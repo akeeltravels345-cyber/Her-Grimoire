@@ -408,6 +408,19 @@ export default function ProfileScreen() {
 
           <View style={styles.settingDivider} />
 
+          <Pressable style={styles.settingRow} onPress={() => router.push('/month-history')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="auto-stories" size={20} color={'#C9A84C'} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Monthly Chronicle</Text>
+                <Text style={styles.settingDesc}>Browse your past monthly cycles</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+
+          <View style={styles.settingDivider} />
+
           <Pressable style={styles.settingRow} onPress={() => router.push('/manage-categories')}>
             <View style={styles.settingInfo}>
               <MaterialIcons name="tune" size={20} color={theme.textSecondary} />
