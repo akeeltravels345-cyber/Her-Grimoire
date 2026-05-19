@@ -23,6 +23,36 @@ const scheduleOptions = [
   { id: 'as_needed', label: 'One Time', icon: 'more-time' },
 ] as const;
 
+const MOON_PHASES = [
+  { index: 0, name: 'New Moon', emoji: '🌑', energy: 'Intentions & new beginnings' },
+  { index: 1, name: 'Waxing Crescent', emoji: '🌒', energy: 'Building momentum' },
+  { index: 2, name: 'First Quarter', emoji: '🌓', energy: 'Taking action' },
+  { index: 3, name: 'Waxing Gibbous', emoji: '🌔', energy: 'Refinement & growth' },
+  { index: 4, name: 'Full Moon', emoji: '🌕', energy: 'Manifestation & release' },
+  { index: 5, name: 'Waning Gibbous', emoji: '🌖', energy: 'Gratitude & sharing' },
+  { index: 6, name: 'Last Quarter', emoji: '🌗', energy: 'Releasing & letting go' },
+  { index: 7, name: 'Waning Crescent', emoji: '🌘', energy: 'Rest & surrender' },
+];
+
+function getNextMoonPhaseDate(targetPhaseIndex: number): Date {
+  const LUNAR_CYCLE = 29.53058867;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const c = Math.floor(365.25 * year);
+  const e = Math.floor(30.6 * month);
+  const jd = c + e + day - 694039.09;
+  const currentFraction = (((jd / LUNAR_CYCLE) % 1) + 1) % 1;
+  const targetFraction = targetPhaseIndex / 8;
+  let daysUntil = ((targetFraction - currentFraction) * LUNAR_CYCLE + LUNAR_CYCLE) % LUNAR_CYCLE;
+  if (daysUntil < 1) daysUntil += LUNAR_CYCLE;
+  const nextDate = new Date(now);
+  nextDate.setDate(nextDate.getDate() + Math.round(daysUntil));
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
 const DATE_OPTIONS = (() => {
   const dates: Date[] = [];
   const start = new Date();
@@ -54,12 +84,15 @@ export default function AddRitualScreen() {
   const [schedule, setSchedule] = useState<'daily' | 'weekly' | 'monthly' | 'moon_phase' | 'as_needed'>('as_needed');
   const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
   const [consecutiveDays, setConsecutiveDays] = useState(1);
+  const [moonPhaseSelection, setMoonPhaseSelection] = useState<number | null>(null);
 
   const needsDate = schedule !== 'as_needed';
+  const needsMoonPhase = schedule === 'moon_phase';
   const canSave =
     name.trim().length > 0 &&
     intention.trim().length > 0 &&
-    (!needsDate || scheduledDate !== null);
+    (!needsDate || scheduledDate !== null) &&
+    (!needsMoonPhase || moonPhaseSelection !== null);
 
   const handleSave = () => {
     if (!canSave) return;
@@ -71,8 +104,9 @@ export default function AddRitualScreen() {
       tangibleOutcome: tangibleOutcome.trim(),
       ingredients: ingredients.trim() ? ingredients.split(',').map(i => i.trim()).filter(Boolean) : undefined,
       schedule,
+      scheduleDetail: schedule === 'moon_phase' && moonPhaseSelection !== null ? String(moonPhaseSelection) : undefined,
       scheduledDate: scheduledDate ? scheduledDate.toISOString() : undefined,
-      consecutiveDays: schedule === 'daily' ? consecutiveDays : 1,
+      consecutiveDays: consecutiveDays > 1 ? consecutiveDays : undefined,
       status: 'scheduled',
     });
 
@@ -187,8 +221,8 @@ export default function AddRitualScreen() {
               ))}
             </View>
 
-            {/* Consecutive Days — only for daily */}
-            {schedule === 'daily' && (
+            {/* Consecutive Days — all scheduled types */}
+            {schedule !== 'as_needed' && (
               <>
                 <Text style={styles.label}>Consecutive Days</Text>
                 <View style={styles.consecutiveRow}>
@@ -209,11 +243,52 @@ export default function AddRitualScreen() {
                     {consecutiveDays === 1 ? 'day' : 'days in a row'}
                   </Text>
                 </View>
+                {consecutiveDays > 1 && (
+                  <Text style={styles.hint}>
+                    ✦ Creates {consecutiveDays} entries starting from your chosen date
+                  </Text>
+                )}
               </>
             )}
 
-            {/* Inline date selector — hidden for as_needed */}
-            {needsDate && (
+            {/* Moon Phase Picker */}
+            {schedule === 'moon_phase' && (
+              <>
+                <Text style={styles.label}>Moon Phase *</Text>
+                <View style={styles.moonPhaseGrid}>
+                  {MOON_PHASES.map(phase => {
+                    const isSelected = moonPhaseSelection === phase.index;
+                    return (
+                      <Pressable
+                        key={phase.index}
+                        style={[styles.moonPhaseOption, isSelected && styles.moonPhaseOptionActive]}
+                        onPress={() => {
+                          setMoonPhaseSelection(phase.index);
+                          setScheduledDate(getNextMoonPhaseDate(phase.index));
+                          Haptics.selectionAsync();
+                        }}
+                      >
+                        <Text style={styles.moonPhaseEmoji}>{phase.emoji}</Text>
+                        <Text style={[styles.moonPhaseName, isSelected && styles.moonPhaseNameActive]}>
+                          {phase.name}
+                        </Text>
+                        <Text style={styles.moonPhaseEnergy} numberOfLines={1}>
+                          {phase.energy}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {scheduledDate && moonPhaseSelection !== null && (
+                  <Text style={[styles.hint, { color: theme.primary }]}>
+                    ✦ Next {MOON_PHASES[moonPhaseSelection].name}: {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* Date strip — hidden for as_needed and moon_phase */}
+            {needsDate && schedule !== 'moon_phase' && (
               <>
                 <Text style={styles.label}>Start Date *</Text>
                 <ScrollView
@@ -281,6 +356,19 @@ const styles = StyleSheet.create({
   scheduleOptionActive: { backgroundColor: theme.primary + '15', borderColor: theme.primary },
   scheduleOptionText: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
   scheduleOptionTextActive: { color: theme.primary },
+  moonPhaseGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  moonPhaseOption: {
+    width: '48%', padding: 12, borderRadius: theme.radius.md,
+    backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border,
+    alignItems: 'center', gap: 4,
+  },
+  moonPhaseOptionActive: {
+    backgroundColor: theme.primary + '18', borderColor: theme.primary,
+  },
+  moonPhaseEmoji: { fontSize: 28 },
+  moonPhaseName: { fontSize: 13, fontWeight: '700', color: theme.textPrimary, textAlign: 'center' },
+  moonPhaseNameActive: { color: theme.primary },
+  moonPhaseEnergy: { fontSize: 10, color: theme.textMuted, textAlign: 'center', fontStyle: 'italic' },
   consecutiveRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   consecutiveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center' },
   consecutiveValue: { fontSize: 22, fontWeight: '700', color: theme.textPrimary, minWidth: 32, textAlign: 'center' },

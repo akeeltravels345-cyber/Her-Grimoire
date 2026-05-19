@@ -224,6 +224,13 @@ function generatePropagationDates(schedule: string, startDate: Date): Date[] {
       d.setMonth(d.getMonth() + i);
       dates.push(d);
     }
+  } else if (schedule === 'moon_phase') {
+    const LUNAR_CYCLE = 29.53058867;
+    for (let i = 1; i <= 12; i++) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + Math.round(i * LUNAR_CYCLE));
+      dates.push(d);
+    }
   }
   return dates;
 }
@@ -346,7 +353,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addRitual = (ritual: Omit<Ritual, 'id' | 'createdAt' | 'timesPerformed' | 'journal'> & { status?: Ritual['status'] }) => {
     const id = Date.now().toString();
     const seriesId = 'series_' + id;
-    const shouldPropagate = ['daily', 'weekly', 'monthly'].includes(ritual.schedule);
+    const shouldPropagate = ['daily', 'weekly', 'monthly', 'moon_phase'].includes(ritual.schedule);
 
     const numConsecutive = ritual.consecutiveDays || 1;
     const groupId = numConsecutive > 1 ? 'group_' + id : undefined;
