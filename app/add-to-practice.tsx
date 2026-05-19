@@ -18,8 +18,38 @@ const scheduleOptions = [
   { id: 'weekly',     label: 'Weekly',     icon: 'date-range' },
   { id: 'monthly',    label: 'Monthly',    icon: 'calendar-month' },
   { id: 'moon_phase', label: 'Moon Phase', icon: 'nightlight-round' },
-  { id: 'as_needed',  label: 'As Needed',  icon: 'more-time' },
+  { id: 'as_needed',  label: 'One Time',   icon: 'more-time' },
 ] as const;
+
+const MOON_PHASES = [
+  { index: 0, name: 'New Moon',        emoji: '🌑', energy: 'Intentions & new beginnings' },
+  { index: 1, name: 'Waxing Crescent', emoji: '🌒', energy: 'Building momentum' },
+  { index: 2, name: 'First Quarter',   emoji: '🌓', energy: 'Taking action' },
+  { index: 3, name: 'Waxing Gibbous',  emoji: '🌔', energy: 'Refinement & growth' },
+  { index: 4, name: 'Full Moon',       emoji: '🌕', energy: 'Manifestation & release' },
+  { index: 5, name: 'Waning Gibbous',  emoji: '🌖', energy: 'Gratitude & sharing' },
+  { index: 6, name: 'Last Quarter',    emoji: '🌗', energy: 'Releasing & letting go' },
+  { index: 7, name: 'Waning Crescent', emoji: '🌘', energy: 'Rest & surrender' },
+];
+
+function getNextMoonPhaseDate(targetPhaseIndex: number): Date {
+  const LUNAR_CYCLE = 29.53058867;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const c = Math.floor(365.25 * year);
+  const e = Math.floor(30.6 * month);
+  const jd = c + e + day - 694039.09;
+  const currentFraction = (((jd / LUNAR_CYCLE) % 1) + 1) % 1;
+  const targetFraction = targetPhaseIndex / 8;
+  let daysUntil = ((targetFraction - currentFraction) * LUNAR_CYCLE + LUNAR_CYCLE) % LUNAR_CYCLE;
+  if (daysUntil < 1) daysUntil += LUNAR_CYCLE;
+  const nextDate = new Date(now);
+  nextDate.setDate(nextDate.getDate() + Math.round(daysUntil));
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
 
 const DATE_OPTIONS = (() => {
   const dates: Date[] = [];
@@ -46,18 +76,26 @@ export default function AddToPracticeScreen() {
     libRitual?.schedule || 'as_needed'
   );
   const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
-  const [consecutiveDays, setConsecutiveDays] = useState('1');
+  const [consecutiveDays, setConsecutiveDays] = useState(1);
+  const [moonPhaseSelection, setMoonPhaseSelection] = useState<number | null>(
+    libRitual?.schedule === 'moon_phase' && libRitual?.scheduleDetail != null
+      ? parseInt(libRitual.scheduleDetail)
+      : null
+  );
   const [tangibleOutcome, setTangibleOutcome] = useState(libRitual?.tangibleOutcome || '');
 
-  const parsedConsecutive = Math.max(1, parseInt(consecutiveDays) || 1);
-  const canSave = scheduledDate !== null;
+  const isMoonPhase = schedule === 'moon_phase';
+  const canSave =
+    scheduledDate !== null &&
+    (!isMoonPhase || moonPhaseSelection !== null);
 
   const handleSave = () => {
     if (!canSave || !libraryId) return;
     addToPractice(libraryId, {
-      scheduledDate: scheduledDate ? scheduledDate.toISOString() : undefined,
+      scheduledDate: scheduledDate!.toISOString(),
       schedule,
-      consecutiveDays: schedule === 'daily' ? parsedConsecutive : 1,
+      scheduleDetail: isMoonPhase && moonPhaseSelection !== null ? String(moonPhaseSelection) : undefined,
+      consecutiveDays: consecutiveDays > 1 ? consecutiveDays : undefined,
       tangibleOutcome: tangibleOutcome.trim(),
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -142,7 +180,12 @@ export default function AddToPracticeScreen() {
               <Pressable
                 key={opt.id}
                 style={[styles.scheduleOption, schedule === opt.id && styles.scheduleOptionActive]}
-                onPress={() => { setSchedule(opt.id); Haptics.selectionAsync(); }}
+                onPress={() => {
+                  setSchedule(opt.id);
+                  setScheduledDate(null);
+                  setMoonPhaseSelection(null);
+                  Haptics.selectionAsync();
+                }}
               >
                 <MaterialIcons
                   name={opt.icon as keyof typeof MaterialIcons.glyphMap}
@@ -156,67 +199,107 @@ export default function AddToPracticeScreen() {
             ))}
           </View>
 
-          {/* Consecutive days — only for daily */}
-          {schedule === 'daily' && (
+          {/* Consecutive Days — all schedule types */}
+          <Text style={styles.label}>Consecutive Days</Text>
+          <View style={styles.consecutiveRow}>
+            <Pressable
+              style={styles.consecutiveBtn}
+              onPress={() => { setConsecutiveDays(d => Math.max(1, d - 1)); Haptics.selectionAsync(); }}
+            >
+              <MaterialIcons name="remove" size={20} color={theme.textPrimary} />
+            </Pressable>
+            <Text style={styles.consecutiveValue}>{consecutiveDays}</Text>
+            <Pressable
+              style={styles.consecutiveBtn}
+              onPress={() => { setConsecutiveDays(d => d + 1); Haptics.selectionAsync(); }}
+            >
+              <MaterialIcons name="add" size={20} color={theme.textPrimary} />
+            </Pressable>
+            <Text style={styles.consecutiveLabel}>
+              {consecutiveDays === 1 ? 'day' : 'days in a row'}
+            </Text>
+          </View>
+          {consecutiveDays > 1 && (
+            <Text style={styles.hint}>
+              ✦ Creates {consecutiveDays} entries starting from your chosen date
+            </Text>
+          )}
+
+          {/* Moon Phase Picker */}
+          {isMoonPhase && (
             <>
-              <Text style={styles.label}>Consecutive Days</Text>
-              <View style={styles.consecutiveRow}>
-                <Pressable
-                  style={styles.consecutiveBtn}
-                  onPress={() => { setConsecutiveDays(String(Math.max(1, parsedConsecutive - 1))); Haptics.selectionAsync(); }}
-                >
-                  <MaterialIcons name="remove" size={20} color={theme.textPrimary} />
-                </Pressable>
-                <Text style={styles.consecutiveValue}>{parsedConsecutive}</Text>
-                <Pressable
-                  style={styles.consecutiveBtn}
-                  onPress={() => { setConsecutiveDays(String(parsedConsecutive + 1)); Haptics.selectionAsync(); }}
-                >
-                  <MaterialIcons name="add" size={20} color={theme.textPrimary} />
-                </Pressable>
-                <Text style={styles.consecutiveLabel}>
-                  {parsedConsecutive === 1 ? 'day' : 'days in a row'}
-                </Text>
+              <Text style={styles.label}>Moon Phase *</Text>
+              <View style={styles.moonPhaseGrid}>
+                {MOON_PHASES.map(phase => {
+                  const isSelected = moonPhaseSelection === phase.index;
+                  return (
+                    <Pressable
+                      key={phase.index}
+                      style={[styles.moonPhaseOption, isSelected && styles.moonPhaseOptionActive]}
+                      onPress={() => {
+                        setMoonPhaseSelection(phase.index);
+                        setScheduledDate(getNextMoonPhaseDate(phase.index));
+                        Haptics.selectionAsync();
+                      }}
+                    >
+                      <Text style={styles.moonPhaseEmoji}>{phase.emoji}</Text>
+                      <Text style={[styles.moonPhaseName, isSelected && styles.moonPhaseNameActive]}>
+                        {phase.name}
+                      </Text>
+                      <Text style={styles.moonPhaseEnergy} numberOfLines={1}>
+                        {phase.energy}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
+              {scheduledDate && moonPhaseSelection !== null && (
+                <Text style={[styles.hint, { color: theme.primary }]}>
+                  ✦ Next {MOON_PHASES[moonPhaseSelection].name}: {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                </Text>
+              )}
             </>
           )}
 
-          {/* Inline date selector */}
-          <Text style={styles.label}>Start Date *</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dateStrip}
-          >
-            {DATE_OPTIONS.map((d, i) => {
-              const isSelected = scheduledDate?.toDateString() === d.toDateString();
-              const isToday = d.toDateString() === new Date().toDateString();
-              return (
-                <Pressable
-                  key={i}
-                  style={[styles.datePill, isSelected && styles.datePillActive]}
-                  onPress={() => { setScheduledDate(d); Haptics.selectionAsync(); }}
-                >
-                  <Text style={[styles.datePillDay, isSelected && styles.datePillTextActive]}>
-                    {isToday ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' })}
-                  </Text>
-                  <Text style={[styles.datePillNum, isSelected && styles.datePillTextActive]}>
-                    {d.getDate()}
-                  </Text>
-                  <Text style={[styles.datePillMonth, isSelected && styles.datePillTextActive]}>
-                    {d.toLocaleDateString('en-US', { month: 'short' })}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          {!scheduledDate && (
-            <Text style={styles.hint}>Swipe to pick a date</Text>
-          )}
-          {scheduledDate && (
-            <Text style={[styles.hint, { color: theme.primary }]}>
-              Scheduled for {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-            </Text>
+          {/* Date strip — hidden for moon_phase */}
+          {!isMoonPhase && (
+            <>
+              <Text style={styles.label}>Start Date *</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.dateStrip}
+              >
+                {DATE_OPTIONS.map((d, i) => {
+                  const isSelected = scheduledDate?.toDateString() === d.toDateString();
+                  const isToday = d.toDateString() === new Date().toDateString();
+                  return (
+                    <Pressable
+                      key={i}
+                      style={[styles.datePill, isSelected && styles.datePillActive]}
+                      onPress={() => { setScheduledDate(d); Haptics.selectionAsync(); }}
+                    >
+                      <Text style={[styles.datePillDay, isSelected && styles.datePillTextActive]}>
+                        {isToday ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' })}
+                      </Text>
+                      <Text style={[styles.datePillNum, isSelected && styles.datePillTextActive]}>
+                        {d.getDate()}
+                      </Text>
+                      <Text style={[styles.datePillMonth, isSelected && styles.datePillTextActive]}>
+                        {d.toLocaleDateString('en-US', { month: 'short' })}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              {!scheduledDate ? (
+                <Text style={styles.hint}>Swipe to pick a start date</Text>
+              ) : (
+                <Text style={[styles.hint, { color: theme.primary }]}>
+                  Scheduled for {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                </Text>
+              )}
+            </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -255,6 +338,14 @@ const styles = StyleSheet.create({
   consecutiveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center' },
   consecutiveValue: { fontSize: 22, fontWeight: '700', color: theme.textPrimary, minWidth: 32, textAlign: 'center' },
   consecutiveLabel: { fontSize: 14, color: theme.textSecondary },
+
+  moonPhaseGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  moonPhaseOption: { width: '48%', padding: 12, borderRadius: theme.radius.md, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border, alignItems: 'center', gap: 4 },
+  moonPhaseOptionActive: { backgroundColor: theme.primary + '18', borderColor: theme.primary },
+  moonPhaseEmoji: { fontSize: 28 },
+  moonPhaseName: { fontSize: 13, fontWeight: '700', color: theme.textPrimary, textAlign: 'center' },
+  moonPhaseNameActive: { color: theme.primary },
+  moonPhaseEnergy: { fontSize: 10, color: theme.textMuted, textAlign: 'center', fontStyle: 'italic' },
 
   dateStrip: { paddingVertical: 4, paddingRight: 16, gap: 8 },
   datePill: { alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border, minWidth: 58 },

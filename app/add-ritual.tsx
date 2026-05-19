@@ -86,7 +86,7 @@ export default function AddRitualScreen() {
   const [consecutiveDays, setConsecutiveDays] = useState(1);
   const [moonPhaseSelection, setMoonPhaseSelection] = useState<number | null>(null);
 
-  const needsDate = schedule !== 'as_needed';
+  const needsDate = schedule !== 'as_needed' || consecutiveDays > 1;
   const needsMoonPhase = schedule === 'moon_phase';
   const canSave =
     name.trim().length > 0 &&
@@ -221,34 +221,30 @@ export default function AddRitualScreen() {
               ))}
             </View>
 
-            {/* Consecutive Days — all scheduled types */}
-            {schedule !== 'as_needed' && (
-              <>
-                <Text style={styles.label}>Consecutive Days</Text>
-                <View style={styles.consecutiveRow}>
-                  <Pressable
-                    style={styles.consecutiveBtn}
-                    onPress={() => { setConsecutiveDays(d => Math.max(1, d - 1)); Haptics.selectionAsync(); }}
-                  >
-                    <MaterialIcons name="remove" size={20} color={theme.textPrimary} />
-                  </Pressable>
-                  <Text style={styles.consecutiveValue}>{consecutiveDays}</Text>
-                  <Pressable
-                    style={styles.consecutiveBtn}
-                    onPress={() => { setConsecutiveDays(d => d + 1); Haptics.selectionAsync(); }}
-                  >
-                    <MaterialIcons name="add" size={20} color={theme.textPrimary} />
-                  </Pressable>
-                  <Text style={styles.consecutiveLabel}>
-                    {consecutiveDays === 1 ? 'day' : 'days in a row'}
-                  </Text>
-                </View>
-                {consecutiveDays > 1 && (
-                  <Text style={styles.hint}>
-                    ✦ Creates {consecutiveDays} entries starting from your chosen date
-                  </Text>
-                )}
-              </>
+            {/* Consecutive Days — all schedule types */}
+            <Text style={styles.label}>Consecutive Days</Text>
+            <View style={styles.consecutiveRow}>
+              <Pressable
+                style={styles.consecutiveBtn}
+                onPress={() => { setConsecutiveDays(d => Math.max(1, d - 1)); Haptics.selectionAsync(); }}
+              >
+                <MaterialIcons name="remove" size={20} color={theme.textPrimary} />
+              </Pressable>
+              <Text style={styles.consecutiveValue}>{consecutiveDays}</Text>
+              <Pressable
+                style={styles.consecutiveBtn}
+                onPress={() => { setConsecutiveDays(d => d + 1); Haptics.selectionAsync(); }}
+              >
+                <MaterialIcons name="add" size={20} color={theme.textPrimary} />
+              </Pressable>
+              <Text style={styles.consecutiveLabel}>
+                {consecutiveDays === 1 ? 'day' : 'days in a row'}
+              </Text>
+            </View>
+            {consecutiveDays > 1 && (
+              <Text style={styles.hint}>
+                ✦ Creates {consecutiveDays} entries starting from your chosen date
+              </Text>
             )}
 
             {/* Moon Phase Picker */}

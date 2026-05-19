@@ -18,6 +18,17 @@ const scheduleLabels: Record<string, string> = {
   daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon Phase', as_needed: 'As Needed', monthly: 'Monthly',
 };
 
+const MOON_PHASE_NAMES = ['New Moon', 'Waxing Crescent', 'First Quarter', 'Waxing Gibbous', 'Full Moon', 'Waning Gibbous', 'Last Quarter', 'Waning Crescent'];
+const MOON_PHASE_EMOJIS = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
+
+function getScheduleLabel(schedule: string, scheduleDetail?: string): string {
+  if (schedule === 'moon_phase' && scheduleDetail != null) {
+    const idx = parseInt(scheduleDetail);
+    if (!isNaN(idx) && idx >= 0 && idx < 8) return `${MOON_PHASE_EMOJIS[idx]} ${MOON_PHASE_NAMES[idx]}`;
+  }
+  return scheduleLabels[schedule] || schedule;
+}
+
 export default function RitualDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -151,7 +162,7 @@ for (let i = 0; i < 90; i++) {
 
       showAlert(
         'Delete Ritual',
-        `This is part of a ${scheduleLabels[ritual.schedule] || ''} series (${seriesCount} total). What would you like to delete?`,
+        `This is part of a ${getScheduleLabel(ritual.schedule, ritual.scheduleDetail)} series (${seriesCount} total). What would you like to delete?`,
         buttons
       );
     } else {
@@ -288,7 +299,7 @@ for (let i = 0; i < 90; i++) {
                 </View>
                 <View style={styles.tag}>
                   <MaterialIcons name="schedule" size={12} color={theme.textSecondary} />
-                  <Text style={styles.tagText}>{scheduleLabels[ritual.schedule]}</Text>
+                  <Text style={styles.tagText}>{getScheduleLabel(ritual.schedule, ritual.scheduleDetail)}</Text>
                 </View>
                 <View style={[styles.tag, { backgroundColor: msStyle.color + '20' }]}>
                   <MaterialIcons name={msStyle.icon} size={12} color={msStyle.color} />
@@ -327,7 +338,7 @@ for (let i = 0; i < 90; i++) {
           <Pressable style={styles.stopBanner} onPress={handleStopSchedule}>
             <MaterialIcons name="stop-circle" size={18} color={theme.warning} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.stopBannerTitle}>Recurring {scheduleLabels[ritual.schedule]} Schedule</Text>
+              <Text style={styles.stopBannerTitle}>Recurring {getScheduleLabel(ritual.schedule, ritual.scheduleDetail)} Schedule</Text>
               <Text style={styles.stopBannerSub}>{futureInSeries} future occurrence{futureInSeries !== 1 ? 's' : ''} remaining</Text>
             </View>
             <Text style={styles.stopBannerAction}>Stop</Text>

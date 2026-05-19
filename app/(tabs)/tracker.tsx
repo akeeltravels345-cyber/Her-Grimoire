@@ -60,8 +60,18 @@ interface GroupedSection {
 }
 
 const scheduleLabels: Record<string, string> = {
-  daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon', as_needed: 'As Needed', monthly: 'Monthly',
+  daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon Phase', as_needed: 'One Time', monthly: 'Monthly',
 };
+
+const MOON_PHASE_NAMES = ['🌑 New Moon', '🌒 Waxing Crescent', '🌓 First Quarter', '🌔 Waxing Gibbous', '🌕 Full Moon', '🌖 Waning Gibbous', '🌗 Last Quarter', '🌘 Waning Crescent'];
+
+function getScheduleLabel(schedule: string, scheduleDetail?: string): string {
+  if (schedule === 'moon_phase' && scheduleDetail != null) {
+    const idx = parseInt(scheduleDetail);
+    if (!isNaN(idx) && idx >= 0 && idx < 8) return MOON_PHASE_NAMES[idx];
+  }
+  return scheduleLabels[schedule] || schedule;
+}
 
 export default function TrackerScreen() {
   const insets = useSafeAreaInsets();
@@ -264,7 +274,7 @@ export default function TrackerScreen() {
                 ) : null}
                 <View style={styles.badge}>
                   <MaterialIcons name="schedule" size={10} color={theme.textMuted} />
-                  <Text style={styles.badgeText}>{scheduleLabels[ritual.schedule] || ritual.schedule}</Text>
+                  <Text style={styles.badgeText}>{getScheduleLabel(ritual.schedule, ritual.scheduleDetail)}</Text>
                 </View>
               </>
             )}

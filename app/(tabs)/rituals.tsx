@@ -34,8 +34,19 @@ const DAY_PILL_HEIGHT = 64;
 const DAY_PILL_GAP = 6;
 
 const scheduleLabels: Record<string, string> = {
-  daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon', as_needed: 'As Needed', monthly: 'Monthly',
+  daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon Phase', as_needed: 'One Time', monthly: 'Monthly',
 };
+
+const MOON_PHASE_NAMES = ['New Moon', 'Waxing Crescent', 'First Quarter', 'Waxing Gibbous', 'Full Moon', 'Waning Gibbous', 'Last Quarter', 'Waning Crescent'];
+const MOON_PHASE_EMOJIS = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
+
+function getScheduleLabel(schedule: string, scheduleDetail?: string): string {
+  if (schedule === 'moon_phase' && scheduleDetail != null) {
+    const idx = parseInt(scheduleDetail);
+    if (!isNaN(idx) && idx >= 0 && idx < 8) return `${MOON_PHASE_EMOJIS[idx]} ${MOON_PHASE_NAMES[idx]}`;
+  }
+  return scheduleLabels[schedule] || schedule;
+}
 
 function getMonthDays(): Date[] {
   const now = new Date();
@@ -231,7 +242,7 @@ export default function RitualsScreen() {
         { text: 'This Only', onPress: () => { deleteRitual(ritual.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } },
       ];
       if (futureCount > 1) buttons.push({ text: `This & Future (${futureCount})`, style: 'destructive', onPress: () => { deleteFutureInSeries(ritual.seriesId!, ritual.scheduledDate || new Date().toISOString()); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } });
-      showAlert('Delete Ritual', `This ritual is part of a ${scheduleLabels[ritual.schedule] || ''} series (${seriesCount} total). What would you like to delete?`, buttons);
+      showAlert('Delete Ritual', `This ritual is part of a ${getScheduleLabel(ritual.schedule, ritual.scheduleDetail)} series (${seriesCount} total). What would you like to delete?`, buttons);
     } else {
       deleteRitual(ritual.id);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -276,7 +287,7 @@ export default function RitualsScreen() {
             </View>
             <View style={styles.cardBadgeRow}>
               <View style={[styles.cardBadge, { backgroundColor: catColor + '12' }]}><Text style={[styles.cardBadgeText, { color: catColor }]}>{cat?.name || ritual.category}</Text></View>
-              <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>{scheduleLabels[ritual.schedule] || ritual.schedule}</Text></View>
+              <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>{getScheduleLabel(ritual.schedule, ritual.scheduleDetail)}</Text></View>
               {(ritual.seriesId || ritual.groupId) ? <View style={[styles.cardBadge, { backgroundColor: theme.accent + '12' }]}><MaterialIcons name="repeat" size={10} color={theme.accent} /><Text style={[styles.cardBadgeText, { color: theme.accent }]}>Series</Text></View> : null}
               {manif ? <View style={[styles.cardBadge, { backgroundColor: manif.status === 'spilled' ? theme.success + '12' : manif.status === 'stirring' ? '#4EA8DE12' : theme.primary + '12' }]}><Text style={[styles.cardBadgeText, { color: manif.status === 'spilled' ? theme.success : manif.status === 'stirring' ? '#4EA8DE' : theme.primary }]}>{manif.status === 'spilled' ? '⭐ Spilled' : manif.status === 'stirring' ? '🌊 Stirring' : '🪄 Brewing'}</Text></View> : null}
             </View>
