@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform,
@@ -55,7 +55,8 @@ const DATE_OPTIONS = (() => {
   const dates: Date[] = [];
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  for (let i = 0; i < 60; i++) {
+  start.setDate(start.getDate() - 30); // allow 30 days back
+  for (let i = 0; i < 91; i++) {       // 30 past + today + 60 future
     const d = new Date(start);
     d.setDate(d.getDate() + i);
     dates.push(d);
@@ -83,6 +84,16 @@ export default function AddToPracticeScreen() {
       : null
   );
   const [tangibleOutcome, setTangibleOutcome] = useState(libRitual?.tangibleOutcome || '');
+  const dateScrollRef = useRef<any>(null);
+  const DATE_TODAY_INDEX = 30;
+
+  useEffect(() => {
+    if (dateScrollRef.current) {
+      setTimeout(() => {
+        dateScrollRef.current?.scrollTo({ x: DATE_TODAY_INDEX * 72, animated: false });
+      }, 100);
+    }
+  }, []);
 
   const isMoonPhase = schedule === 'moon_phase';
   const canSave =
@@ -266,6 +277,7 @@ export default function AddToPracticeScreen() {
             <>
               <Text style={styles.label}>Start Date *</Text>
               <ScrollView
+                ref={dateScrollRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.dateStrip}

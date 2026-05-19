@@ -245,7 +245,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.appName}>Grimoire</Text>
                 <Text style={styles.tagline}>Your witchcraft practice,{'\n'}illuminated.</Text>
                 <Text style={styles.body}>
-                  Track rituals, set intentions, cast your spells, and watch your work unfold — all in one sacred space.
+                  Track rituals, set intentions, cast your spells, and watch your work unfold. All in one sacred space.
                 </Text>
 
                 <View style={styles.featureList}>
@@ -276,7 +276,7 @@ export default function OnboardingScreen() {
               <View style={styles.stepWrap}>
                 <Text style={styles.stepGlyph}>✦</Text>
                 <Text style={styles.stepTitle}>What shall we call you?</Text>
-                <Text style={styles.stepSub}>Your name or craft name — this is your space.</Text>
+                <Text style={styles.stepSub}>Your name or craft name. This is your space.</Text>
 
                 <View style={styles.inputBox}>
                   <TextInput

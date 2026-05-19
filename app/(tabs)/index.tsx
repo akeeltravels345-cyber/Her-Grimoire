@@ -5,17 +5,18 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme, getCurrentMoonPhase } from '../../constants/theme';
 import { getTodayPlanet } from '../../constants/planetaryData';
 import { getCurrentPlanetaryHour, formatHourTime, PlanetaryHourInfo } from '../../services/planetaryHours';
 import { useApp } from '../../contexts/AppContext';
 import { getComputedStatus, getDaysUntil } from '../../services/mockData';
 
-function getGreeting(): string {
+function getGreetingPrefix(): string {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good Morning ✦';
-  if (hour < 17) return 'Good Afternoon ✦';
-  return 'Good Evening ✦';
+  if (hour < 12) return 'Morning';
+  if (hour < 17) return 'Afternoon';
+  return 'Evening';
 }
 
 import StarField from '../../components/StarField';
@@ -48,12 +49,21 @@ export default function DashboardScreen() {
   const [intentionBannerDismissed, setIntentionBannerDismissed] = useState(false);
   const [reviewBannerDismissed, setReviewBannerDismissed] = useState(false);
   const [newMonthCardDismissed, setNewMonthCardDismissed] = useState(false);
+  const [firstName, setFirstName] = useState('');
 
   useEffect(() => {
     const update = () => setCurrentHour(getCurrentPlanetaryHour());
     update();
     const interval = setInterval(update, 60000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem('grimoire_profile').then(raw => {
+      if (raw) {
+        try { const p = JSON.parse(raw); setFirstName(p.firstName || ''); } catch {}
+      }
+    });
   }, []);
 
   // ── Monthly cycle banners ──
@@ -193,7 +203,7 @@ export default function DashboardScreen() {
   }, [rituals, standaloneEntries]);
 
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  const greeting = getGreeting();
+  const greeting = firstName ? `${getGreetingPrefix()}, ${firstName} ✦` : `${getGreetingPrefix()} ✦`;
 
   function getOverduePill(days: number): string {
     if (days === -1) return '1d overdue';

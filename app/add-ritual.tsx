@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform,
@@ -57,7 +57,8 @@ const DATE_OPTIONS = (() => {
   const dates: Date[] = [];
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  for (let i = 0; i < 60; i++) {
+  start.setDate(start.getDate() - 30); // allow 30 days back
+  for (let i = 0; i < 91; i++) {      // 30 past + today + 60 future
     const d = new Date(start);
     d.setDate(d.getDate() + i);
     dates.push(d);
@@ -85,6 +86,17 @@ export default function AddRitualScreen() {
   const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
   const [consecutiveDays, setConsecutiveDays] = useState(1);
   const [moonPhaseSelection, setMoonPhaseSelection] = useState<number | null>(null);
+  const dateScrollRef = useRef<any>(null);
+  const DATE_TODAY_INDEX = 30; // DATE_OPTIONS starts 30 days back
+
+  useEffect(() => {
+    // Scroll date strip to today on mount
+    if (dateScrollRef.current) {
+      setTimeout(() => {
+        dateScrollRef.current?.scrollTo({ x: DATE_TODAY_INDEX * 72, animated: false });
+      }, 100);
+    }
+  }, []);
 
   const needsDate = schedule !== 'as_needed' || consecutiveDays > 1;
   const needsMoonPhase = schedule === 'moon_phase';
@@ -198,8 +210,17 @@ export default function AddRitualScreen() {
             <Text style={styles.hint}>✦ If set, auto-adds an entry in your Cauldron (manifestation tracker)</Text>
 
             {/* Description */}
-            <Text style={styles.label}>Description</Text>
-            <TextInput style={[styles.input, styles.textArea]} value={description} onChangeText={setDescription} placeholder="Describe the ritual process, steps, and any special notes..." placeholderTextColor={theme.textMuted} multiline textAlignVertical="top" />
+            <Text style={styles.label}>Steps & Description</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder={"Step 1: Light the candle\nStep 2: Hold the crystal...\n\nOr describe freely — whatever works for you."}
+              placeholderTextColor={theme.textMuted}
+              multiline
+              textAlignVertical="top"
+            />
+            <Text style={styles.hint}>List steps line by line, or write freely</Text>
 
             {/* Ingredients */}
             <Text style={styles.label}>Ingredients & Tools</Text>
@@ -288,6 +309,7 @@ export default function AddRitualScreen() {
               <>
                 <Text style={styles.label}>Start Date *</Text>
                 <ScrollView
+                  ref={dateScrollRef}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.dateStrip}
