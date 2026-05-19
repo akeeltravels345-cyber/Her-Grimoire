@@ -271,13 +271,16 @@ export default function OnboardingScreen() {
                     placeholderTextColor={theme.textMuted}
                     autoFocus
                     returnKeyType="done"
-                    onSubmitEditing={handleNext}
+                    onSubmitEditing={() => { if (firstName.trim()) handleNext(); }}
                   />
                 </View>
 
-                <Text style={styles.optionalHint}>You can always change this in your profile.</Text>
+                <Text style={styles.optionalHint}>A craft name is fine too — this is your space.</Text>
 
-                <Pressable style={styles.primaryBtn} onPress={handleNext}>
+                <Pressable
+                  style={[styles.primaryBtn, !firstName.trim() && { opacity: 0.4 }]}
+                  onPress={firstName.trim() ? handleNext : undefined}
+                >
                   <LinearGradient
                     colors={[theme.primary + 'EE', theme.primaryDark + 'EE']}
                     start={{ x: 0, y: 0 }}
@@ -286,10 +289,6 @@ export default function OnboardingScreen() {
                   >
                     <Text style={styles.primaryBtnText}>Continue</Text>
                   </LinearGradient>
-                </Pressable>
-
-                <Pressable onPress={handleNext} style={styles.skipBtn}>
-                  <Text style={styles.skipText}>Skip for now</Text>
                 </Pressable>
               </View>
             )}
