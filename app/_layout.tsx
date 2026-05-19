@@ -44,6 +44,7 @@ export default function RootLayout() {
             <Stack.Screen name="monthly-intention" options={{ presentation: 'card' }} />
             <Stack.Screen name="month-review" options={{ presentation: 'card' }} />
             <Stack.Screen name="month-history" options={{ presentation: 'card' }} />
+            <Stack.Screen name="privacy-policy" options={{ presentation: 'card' }} />
           </Stack>
         </AppProvider>
       </SafeAreaProvider>

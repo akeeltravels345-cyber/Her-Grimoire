@@ -487,6 +487,19 @@ export default function ProfileScreen() {
             </View>
             <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '500' }}>v1.0</Text>
           </View>
+
+          <View style={styles.settingDivider} />
+
+          <Pressable style={styles.settingRow} onPress={() => router.push('/privacy-policy')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="privacy-tip" size={20} color={theme.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Privacy Policy</Text>
+                <Text style={styles.settingDesc}>How we handle your data</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
         </View>
       </ScrollView>
     </GradientScreen>
