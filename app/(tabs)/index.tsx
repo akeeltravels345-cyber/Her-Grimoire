@@ -46,6 +46,8 @@ export default function DashboardScreen() {
 
   const [currentHour, setCurrentHour] = useState<PlanetaryHourInfo | null>(null);
   const [intentionBannerDismissed, setIntentionBannerDismissed] = useState(false);
+  const [reviewBannerDismissed, setReviewBannerDismissed] = useState(false);
+  const [newMonthCardDismissed, setNewMonthCardDismissed] = useState(false);
 
   useEffect(() => {
     const update = () => setCurrentHour(getCurrentPlanetaryHour());
@@ -54,28 +56,30 @@ export default function DashboardScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  // Monthly intention redirect: days 1-3 of new month
-  useEffect(() => {
-    const now = new Date();
-    const dayOfMonth = now.getDate();
-    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const isEarlyMonth = dayOfMonth >= 1 && dayOfMonth <= 3;
-    const needsIntention = !currentMonthIntention.intentionSet || currentMonthIntention.month !== currentMonthStr;
-    if (isEarlyMonth && needsIntention && dayOfMonth === 1) {
-      router.replace('/monthly-intention');
-    }
-  }, [currentMonthIntention]);
+  // ── Monthly cycle banners ──
+  const now_mc = new Date();
+  const dayOfMonth_mc = now_mc.getDate();
+  const currentMonthStr_mc = `${now_mc.getFullYear()}-${String(now_mc.getMonth() + 1).padStart(2, '0')}`;
+  const daysInMonth_mc = new Date(now_mc.getFullYear(), now_mc.getMonth() + 1, 0).getDate();
+  const needsIntention = !currentMonthIntention.intentionSet || currentMonthIntention.month !== currentMonthStr_mc;
 
-  // Show banner on days 2-3 if intention not set
+  // Day 1: invitation card (replaces hard redirect)
+  const showNewMonthCard = useMemo(() => {
+    if (newMonthCardDismissed) return false;
+    return dayOfMonth_mc === 1 && needsIntention;
+  }, [newMonthCardDismissed, needsIntention, dayOfMonth_mc]);
+
+  // Days 2–3: gentle reminder banner
   const showIntentionBanner = useMemo(() => {
     if (intentionBannerDismissed) return false;
-    const now = new Date();
-    const dayOfMonth = now.getDate();
-    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const isDay2or3 = dayOfMonth === 2 || dayOfMonth === 3;
-    const needsIntention = !currentMonthIntention.intentionSet || currentMonthIntention.month !== currentMonthStr;
-    return isDay2or3 && needsIntention;
-  }, [currentMonthIntention, intentionBannerDismissed]);
+    return (dayOfMonth_mc === 2 || dayOfMonth_mc === 3) && needsIntention;
+  }, [intentionBannerDismissed, needsIntention, dayOfMonth_mc]);
+
+  // Days 27–end: chapter-closing banner
+  const showReviewBanner = useMemo(() => {
+    if (reviewBannerDismissed) return false;
+    return dayOfMonth_mc >= daysInMonth_mc - 3;
+  }, [reviewBannerDismissed, dayOfMonth_mc, daysInMonth_mc]);
 
   const intentionMonthName = useMemo(() => {
     return new Date().toLocaleDateString('en-US', { month: 'long' });
@@ -261,7 +265,58 @@ locations={[0, 0.35, 0.65, 1]}
             </View>
           </View>
 
-          {/* ═══ MONTHLY INTENTION BANNER ═══ */}
+          {/* ═══ DAY 1: NEW MONTH INVITATION ═══ */}
+          {showNewMonthCard ? (
+            <Pressable
+              style={styles.newMonthCard}
+              onPress={() => router.push('/monthly-intention' as any)}
+            >
+              <LinearGradient
+                colors={[theme.primary + '30', theme.primary + '10']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.newMonthEyebrow}>A NEW CHAPTER BEGINS</Text>
+                <Text style={styles.newMonthTitle}>Welcome to {intentionMonthName} ✦</Text>
+                <Text style={styles.newMonthSub}>Set your intention and plan your month</Text>
+              </View>
+              <View style={styles.newMonthArrow}>
+                <MaterialIcons name="arrow-forward" size={20} color={theme.primary} />
+              </View>
+              <Pressable
+                style={styles.newMonthClose}
+                onPress={(e) => { e.stopPropagation?.(); setNewMonthCardDismissed(true); }}
+                hitSlop={12}
+              >
+                <MaterialIcons name="close" size={14} color={theme.textMuted} />
+              </Pressable>
+            </Pressable>
+          ) : null}
+
+          {/* ═══ END OF MONTH: CHAPTER CLOSING BANNER ═══ */}
+          {showReviewBanner ? (
+            <Pressable
+              style={styles.reviewBanner}
+              onPress={() => router.push('/month-review' as any)}
+            >
+              <Text style={styles.reviewBannerIcon}>🌘</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.reviewBannerTitle}>Your chapter is closing</Text>
+                <Text style={styles.reviewBannerSub}>Reflect on {intentionMonthName} before it passes →</Text>
+              </View>
+              <Pressable
+                style={styles.intentionBannerClose}
+                onPress={(e) => { e.stopPropagation?.(); setReviewBannerDismissed(true); }}
+                hitSlop={12}
+              >
+                <MaterialIcons name="close" size={16} color={theme.textMuted} />
+              </Pressable>
+            </Pressable>
+          ) : null}
+
+          {/* ═══ DAYS 2–3: MONTHLY INTENTION BANNER ═══ */}
           {showIntentionBanner ? (
             <Pressable
               style={styles.intentionBanner}
@@ -966,6 +1021,30 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
   },
   activityStandalonePillText: { fontSize: 9, fontWeight: '600', color: theme.textMuted, letterSpacing: 0.3 },
+
+  // ═══ New Month Card ═══
+  newMonthCard: {
+    borderRadius: theme.radius.lg, padding: 16, marginBottom: 16,
+    borderWidth: 1, borderColor: theme.primary + '40',
+    overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  newMonthEyebrow: { fontSize: 9, fontWeight: '700', color: theme.primary, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 },
+  newMonthTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, fontFamily: theme.fonts.serif, marginBottom: 3 },
+  newMonthSub: { fontSize: 12, color: theme.textSecondary },
+  newMonthArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.primary + '20', alignItems: 'center', justifyContent: 'center' },
+  newMonthClose: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+
+  // ═══ Review Banner ═══
+  reviewBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(201,168,76,0.10)',
+    borderRadius: theme.radius.md, paddingVertical: 14, paddingHorizontal: 14,
+    marginBottom: 16, borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)',
+    borderLeftWidth: 3, borderLeftColor: '#C9A84C',
+  },
+  reviewBannerIcon: { fontSize: 20 },
+  reviewBannerTitle: { fontSize: 14, fontWeight: '700', color: '#C9A84C' },
+  reviewBannerSub: { fontSize: 12, color: theme.textSecondary, marginTop: 2 },
 
   // Monthly Intention Banner
   intentionBanner: {

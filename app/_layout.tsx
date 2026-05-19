@@ -27,6 +27,7 @@ export default function RootLayout() {
             <Stack.Screen name="spell-research" options={{ presentation: 'card' }} />
             <Stack.Screen name="core-practice-settings" options={{ presentation: 'card' }} />
             <Stack.Screen name="monthly-intention" options={{ presentation: 'card' }} />
+            <Stack.Screen name="month-review" options={{ presentation: 'card' }} />
           </Stack>
         </AppProvider>
       </SafeAreaProvider>
