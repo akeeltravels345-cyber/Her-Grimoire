@@ -19,6 +19,7 @@ interface ProfileData {
   firstName: string;
   practiceSince: string;
   tradition: string;
+  experienceLevel: string;
   bio: string;
 }
 
@@ -38,6 +39,7 @@ const DEFAULT_PROFILE: ProfileData = {
   firstName: '',
   practiceSince: '',
   tradition: '',
+  experienceLevel: '',
   bio: '',
 };
 
@@ -215,6 +217,16 @@ export default function ProfileScreen() {
                 />
               </View>
               <View style={styles.field}>
+                <Text style={styles.fieldLabel}>EXPERIENCE LEVEL</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={editProfile.experienceLevel}
+                  onChangeText={v => setEditProfile(p => ({ ...p, experienceLevel: v }))}
+                  placeholder="e.g., Just beginning, Established practice..."
+                  placeholderTextColor={theme.textMuted}
+                />
+              </View>
+              <View style={styles.field}>
                 <Text style={styles.fieldLabel}>PRACTICING SINCE</Text>
                 <TextInput
                   style={styles.fieldInput}
@@ -249,6 +261,7 @@ export default function ProfileScreen() {
             <>
               <Text style={styles.craftName}>{profile.firstName || 'Unnamed Practitioner'}</Text>
               {profile.tradition ? <Text style={styles.tradition}>{profile.tradition}</Text> : null}
+              {profile.experienceLevel ? <Text style={styles.practicing}>{profile.experienceLevel}</Text> : null}
               {profile.practiceSince ? <Text style={styles.practicing}>Practicing since {profile.practiceSince}</Text> : null}
               {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
               <Pressable style={styles.editBtn} onPress={() => { setIsEditing(true); setEditProfile(profile); }}>
