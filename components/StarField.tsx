@@ -1,14 +1,6 @@
 import React, { useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Dimensions } from 'react-native';
+import { View, Dimensions, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import ReAnimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
-  withDelay,
-} from 'react-native-reanimated';
 
 interface StarData {
   id: number;
@@ -22,50 +14,42 @@ interface StarData {
 }
 
 function AnimatedStar({ star }: { star: StarData }) {
-  const opacity = useSharedValue(star.baseOpacity * 0.2);
+  const opacity = useRef(new Animated.Value(star.baseOpacity * 0.2)).current;
 
   useEffect(() => {
-    opacity.value = withDelay(
-      star.delay,
-      withRepeat(
-        withSequence(
-          withTiming(star.baseOpacity, { duration: star.duration }),
-          withTiming(star.baseOpacity * 0.2, { duration: star.duration }),
-        ),
-        -1,
-        true
-      )
-    );
+    const timeout = setTimeout(() => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, { toValue: star.baseOpacity, duration: star.duration, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: star.baseOpacity * 0.2, duration: star.duration, useNativeDriver: true }),
+        ])
+      ).start();
+    }, star.delay);
+    return () => clearTimeout(timeout);
   }, []);
 
-  const animStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
-
   return (
-    <ReAnimated.View
-      style={[
-        {
-          position: 'absolute',
-          left: `${star.x}%` as any,
-          top: `${star.y}%` as any,
-          width: star.size,
-          height: star.size,
-          borderRadius: star.size / 2,
-          backgroundColor: star.color,
-        },
-        animStyle,
-      ]}
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: `${star.x}%` as any,
+        top: `${star.y}%` as any,
+        width: star.size,
+        height: star.size,
+        borderRadius: star.size / 2,
+        backgroundColor: star.color,
+        opacity,
+      }}
     />
   );
 }
 
 function ShootingStar() {
   const { width: screenW, height: screenH } = Dimensions.get('window');
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const opacity = useSharedValue(0);
-  const trailScale = useSharedValue(0.3);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const trailScale = useRef(new Animated.Value(0.3)).current;
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trigger = useCallback(() => {
@@ -73,21 +57,24 @@ function ShootingStar() {
     const startY = Math.random() * (screenH * 0.45) + 20;
     const travel = 120 + Math.random() * 80;
 
-    translateX.value = startX;
-    translateY.value = startY;
-    trailScale.value = 0.3;
+    translateX.setValue(startX);
+    translateY.setValue(startY);
+    trailScale.setValue(0.3);
+    opacity.setValue(0);
 
-    opacity.value = withSequence(
-      withTiming(0.95, { duration: 80 }),
-      withTiming(0.75, { duration: 380 }),
-      withTiming(0, { duration: 140 }),
-    );
-    trailScale.value = withSequence(
-      withTiming(1, { duration: 120 }),
-      withTiming(0.5, { duration: 480 }),
-    );
-    translateX.value = withTiming(startX + travel, { duration: 600 });
-    translateY.value = withTiming(startY + travel * 0.55, { duration: 600 });
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.95, duration: 80, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.75, duration: 380, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 140, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(trailScale, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.timing(trailScale, { toValue: 0.5, duration: 480, useNativeDriver: true }),
+      ]),
+      Animated.timing(translateX, { toValue: startX + travel, duration: 600, useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: startY + travel * 0.55, duration: 600, useNativeDriver: true }),
+    ]).start();
   }, [screenW, screenH]);
 
   useEffect(() => {
@@ -105,19 +92,21 @@ function ShootingStar() {
     return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
   }, [trigger]);
 
-  const animStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { rotate: '30deg' },
-      { scaleX: trailScale.value },
-    ],
-  }));
-
   return (
-    <ReAnimated.View
-      style={[{ position: 'absolute', width: 64, height: 2, zIndex: 2 }, animStyle]}
+    <Animated.View
+      style={{
+        position: 'absolute',
+        width: 64,
+        height: 2,
+        zIndex: 2,
+        opacity,
+        transform: [
+          { translateX },
+          { translateY },
+          { rotate: '30deg' },
+          { scaleX: trailScale },
+        ],
+      }}
       pointerEvents="none"
     >
       <LinearGradient
@@ -133,7 +122,7 @@ function ShootingStar() {
         shadowColor: '#F5D5E0', shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.9, shadowRadius: 6, elevation: 4,
       }} />
-    </ReAnimated.View>
+    </Animated.View>
   );
 }
 

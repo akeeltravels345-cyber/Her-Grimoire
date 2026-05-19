@@ -1,14 +1,10 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Platform } from 'react-native';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence,
-  withDelay, Easing, interpolate,
-} from 'react-native-reanimated';
 import { theme, getCurrentMoonPhase } from '../../constants/theme';
 import { getTodayPlanet } from '../../constants/planetaryData';
 import { getCurrentPlanetaryHour, formatHourTime, PlanetaryHourInfo } from '../../services/planetaryHours';
@@ -478,22 +474,21 @@ locations={[0, 0.35, 0.65, 1]}
 
 // ═══ PULSING BORDER for urgent core categories ═══
 function PulsingCoreCatRow({ children }: { children: React.ReactNode }) {
-  const pulse = useSharedValue(0);
+  const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    pulse.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0, { duration: 1600, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      false
-    );
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1600, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        Animated.timing(pulse, { toValue: 0, duration: 1600, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+      ])
+    ).start();
   }, []);
-  const animStyle = useAnimatedStyle(() => ({
-    borderColor: `rgba(232,136,152,${interpolate(pulse.value, [0, 1], [0.15, 0.5])})`,
-  }));
+  const borderColor = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(232,136,152,0.15)', 'rgba(232,136,152,0.5)'],
+  });
   return (
-    <Animated.View style={[msStyles.coreCatRow, msStyles.coreCatRowRed, animStyle]}>
+    <Animated.View style={[msStyles.coreCatRow, msStyles.coreCatRowRed, { borderColor }]}>
       {children}
     </Animated.View>
   );
@@ -504,21 +499,23 @@ function AnimatedProgressBar({ progress, color, delayMs = 0, isGradient = false 
   progress: number; color: string; delayMs?: number; isGradient?: boolean;
 }) {
   const [containerWidth, setContainerWidth] = useState(0);
-  const barWidth = useSharedValue(0);
+  const barWidth = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (containerWidth > 0) {
       const target = Math.max((progress / 100) * containerWidth, progress > 0 ? 3 : 0);
-      barWidth.value = withDelay(delayMs, withTiming(target, { duration: 900, easing: Easing.out(Easing.cubic) }));
+      Animated.sequence([
+        Animated.delay(delayMs),
+        Animated.timing(barWidth, { toValue: target, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      ]).start();
     }
   }, [progress, containerWidth]);
-  const animStyle = useAnimatedStyle(() => ({ width: barWidth.value }));
   return (
     <View
       style={isGradient ? msStyles.completionBarBg : msStyles.coreCatBarBg}
       onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
     >
       {isGradient ? (
-        <Animated.View style={[{ height: 8, borderRadius: 4, overflow: 'hidden' }, animStyle]}>
+        <Animated.View style={[{ height: 8, borderRadius: 4, overflow: 'hidden' }, { width: barWidth }]}>
           <LinearGradient
             colors={[theme.primaryDark, theme.primary, '#DFC4EB']}
             start={{ x: 0, y: 0.5 }}
@@ -527,7 +524,7 @@ function AnimatedProgressBar({ progress, color, delayMs = 0, isGradient = false 
           />
         </Animated.View>
       ) : (
-        <Animated.View style={[msStyles.coreCatBarFill, { backgroundColor: color }, animStyle]} />
+        <Animated.View style={[msStyles.coreCatBarFill, { backgroundColor: color }, { width: barWidth }]} />
       )}
     </View>
   );

@@ -1,15 +1,8 @@
-import React, { useMemo, useEffect } from 'react';
-import { StyleSheet, View, ViewStyle, Dimensions } from 'react-native';
+import React, { useMemo, useEffect, useRef } from 'react';
+import { StyleSheet, View, ViewStyle, Dimensions, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Line, Circle } from 'react-native-svg';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  Easing,
-} from 'react-native-reanimated';
 import StarField from './StarField';
 
 // ═══ Constellation Data ═══
@@ -33,20 +26,15 @@ const CONSTELLATION_LINES = [
 ];
 
 function ConstellationOverlay() {
-  const { width: screenW } = Dimensions.get('window');
-  const rotation = useSharedValue(0);
+  const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    rotation.value = withRepeat(
-      withTiming(360, { duration: 240000, easing: Easing.linear }),
-      -1,
-      false
-    );
+    Animated.loop(
+      Animated.timing(rotation, { toValue: 360, duration: 240000, easing: Easing.linear, useNativeDriver: true })
+    ).start();
   }, []);
 
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
+  const rotateAnim = rotation.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
 
   const viewW = 400;
   const viewH = 200;
@@ -62,7 +50,7 @@ function ConstellationOverlay() {
 
   return (
     <Animated.View
-      style={[styles.constellationContainer, animStyle]}
+      style={[styles.constellationContainer, { transform: [{ rotate: rotateAnim }] }]}
       pointerEvents="none"
     >
       <Svg
