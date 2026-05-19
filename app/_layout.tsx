@@ -1,8 +1,21 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { AlertProvider } from '@/template';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AppProvider } from '../contexts/AppContext';
+import { AppProvider, useApp } from '../contexts/AppContext';
+import { useEffect } from 'react';
+
+/** Redirects to onboarding on first launch, after data has loaded. */
+function OnboardingGate() {
+  const { isLoaded, isOnboarded } = useApp();
+  const router = useRouter();
+  useEffect(() => {
+    if (isLoaded && !isOnboarded) {
+      router.replace('/onboarding');
+    }
+  }, [isLoaded, isOnboarded]);
+  return null;
+}
 
 export default function RootLayout() {
   return (
@@ -10,8 +23,10 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppProvider>
+          <OnboardingGate />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
             <Stack.Screen name="ritual/[id]" options={{ presentation: 'card' }} />
             <Stack.Screen name="add-ritual" options={{ presentation: 'modal' }} />
             <Stack.Screen name="log-ritual" options={{ presentation: 'modal' }} />

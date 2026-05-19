@@ -88,6 +88,8 @@ interface AppContextType {
   currentMonthIntention: { intention: string; ritualIntention: string; intentionSet: boolean; month: string };
   setMonthlyIntention: (intention: string, ritualIntention: string) => void;
   monthlyStreak: number;
+  isOnboarded: boolean;
+  markOnboarded: () => void;
   clearAllData: () => void;
 }
 
@@ -104,6 +106,7 @@ const JOURNAL_TYPES_KEY = 'grimoire_journal_types';
 const DATA_VERSION_KEY = 'grimoire_data_version';
 const SNAPSHOTS_KEY = 'grimoire_monthly_snapshots';
 const MONTHLY_INTENTION_KEY = 'grimoire_monthly_intention';
+const ONBOARDED_KEY = 'grimoire_onboarded';
 
 const CURRENT_DATA_VERSION = '4';
 
@@ -247,6 +250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [coreCategories, setCoreCategoriesState] = useState<string[]>([]);
   const [monthlySnapshots, setMonthlySnapshots] = useState<MonthlySnapshot[]>([]);
   const [currentMonthIntention, setCurrentMonthIntention] = useState({ intention: '', ritualIntention: '', intentionSet: false, month: '' });
+  const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const hasRequestedPermissions = useRef(false);
 
@@ -322,6 +326,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (snapshotData) { try { setMonthlySnapshots(JSON.parse(snapshotData)); } catch {} }
         const intentionData = await AsyncStorage.getItem(MONTHLY_INTENTION_KEY);
         if (intentionData) { try { setCurrentMonthIntention(JSON.parse(intentionData)); } catch {} }
+
+        // Onboarding flag
+        const onboardedFlag = await AsyncStorage.getItem(ONBOARDED_KEY);
+        if (onboardedFlag === 'true') setIsOnboarded(true);
       } catch {}
       setIsLoaded(true);
     })();
@@ -770,6 +778,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRituals(prev => prev.map(r => r.id === ritualId ? { ...r, status } : r));
   };
 
+  const markOnboarded = useCallback(() => {
+    setIsOnboarded(true);
+    AsyncStorage.setItem(ONBOARDED_KEY, 'true');
+  }, []);
+
   const clearAllData = async () => {
     setRituals([]);
     setManifestations([]);
@@ -780,7 +793,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCoreCategoriesState([]);
     setMonthlySnapshots([]);
     setCurrentMonthIntention({ intention: '', ritualIntention: '', intentionSet: false, month: '' });
-    await AsyncStorage.multiRemove([STORAGE_KEY, MANIFESTATIONS_KEY, STANDALONE_KEY, NOTIF_IDS_KEY, LIBRARY_KEY, JOURNAL_TYPES_KEY, MOODS_KEY, CORE_CATEGORIES_KEY, SNAPSHOTS_KEY, MONTHLY_INTENTION_KEY, 'grimoire_spell_research']);
+    setIsOnboarded(false);
+    await AsyncStorage.multiRemove([STORAGE_KEY, MANIFESTATIONS_KEY, STANDALONE_KEY, NOTIF_IDS_KEY, LIBRARY_KEY, JOURNAL_TYPES_KEY, MOODS_KEY, CORE_CATEGORIES_KEY, SNAPSHOTS_KEY, MONTHLY_INTENTION_KEY, ONBOARDED_KEY, 'grimoire_spell_research']);
     await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
   };
 
@@ -797,6 +811,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       moods, addMood, deleteMood,
       coreCategories, setCoreCategories: updateCoreCategories,
       monthlySnapshots, currentMonthIntention, setMonthlyIntention, monthlyStreak,
+      isOnboarded, markOnboarded,
       clearAllData,
     }}>
       {children}
