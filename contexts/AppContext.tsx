@@ -27,7 +27,9 @@ export interface MonthlySnapshot {
   month: string;
   label: string;
   intention: string;
+  release: string;
   ritualIntention: string;
+  reflection: string;
   intentionSet: boolean;
   coreCategoryResults: {
     categoryId: string;
@@ -85,9 +87,10 @@ interface AppContextType {
   coreCategories: string[];
   setCoreCategories: (ids: string[]) => void;
   monthlySnapshots: MonthlySnapshot[];
-  currentMonthIntention: { intention: string; ritualIntention: string; intentionSet: boolean; month: string };
-  setMonthlyIntention: (intention: string, ritualIntention: string) => void;
+  currentMonthIntention: { intention: string; release: string; ritualIntention: string; intentionSet: boolean; month: string };
+  setMonthlyIntention: (intention: string, release: string, ritualIntention: string) => void;
   monthlyStreak: number;
+  saveReflection: (month: string, reflection: string) => void;
   isOnboarded: boolean;
   markOnboarded: () => void;
   clearAllData: () => void;
@@ -249,7 +252,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [moods, setMoods] = useState<string[]>(DEFAULT_MOODS);
   const [coreCategories, setCoreCategoriesState] = useState<string[]>([]);
   const [monthlySnapshots, setMonthlySnapshots] = useState<MonthlySnapshot[]>([]);
-  const [currentMonthIntention, setCurrentMonthIntention] = useState({ intention: '', ritualIntention: '', intentionSet: false, month: '' });
+  const [currentMonthIntention, setCurrentMonthIntention] = useState({ intention: '', release: '', ritualIntention: '', intentionSet: false, month: '' });
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const hasRequestedPermissions = useRef(false);
@@ -669,10 +672,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCoreCategoriesState(valid);
   };
 
-  const setMonthlyIntention = (intention: string, ritualIntention: string) => {
+  const setMonthlyIntention = (intention: string, release: string, ritualIntention: string) => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    setCurrentMonthIntention({ intention, ritualIntention, intentionSet: true, month });
+    setCurrentMonthIntention({ intention, release, ritualIntention, intentionSet: true, month });
   };
 
   const createMonthlySnapshot = useCallback((year: number, month: number) => {
@@ -719,7 +722,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       month: monthStr,
       label: `${monthNames[month]} ${year}`,
       intention: currentMonthIntention.month === monthStr ? currentMonthIntention.intention : '',
+      release: currentMonthIntention.month === monthStr ? currentMonthIntention.release : '',
       ritualIntention: currentMonthIntention.month === monthStr ? currentMonthIntention.ritualIntention : '',
+      reflection: '',
       intentionSet: currentMonthIntention.month === monthStr ? currentMonthIntention.intentionSet : false,
       coreCategoryResults,
       totalScheduled: monthRituals.length,
@@ -778,6 +783,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRituals(prev => prev.map(r => r.id === ritualId ? { ...r, status } : r));
   };
 
+  const saveReflection = useCallback((month: string, reflection: string) => {
+    setMonthlySnapshots(prev => prev.map(s => s.month === month ? { ...s, reflection } : s));
+  }, []);
+
   const markOnboarded = useCallback(() => {
     setIsOnboarded(true);
     AsyncStorage.setItem(ONBOARDED_KEY, 'true');
@@ -792,7 +801,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMoods(DEFAULT_MOODS);
     setCoreCategoriesState([]);
     setMonthlySnapshots([]);
-    setCurrentMonthIntention({ intention: '', ritualIntention: '', intentionSet: false, month: '' });
+    setCurrentMonthIntention({ intention: '', release: '', ritualIntention: '', intentionSet: false, month: '' });
     setIsOnboarded(false);
     await AsyncStorage.multiRemove([STORAGE_KEY, MANIFESTATIONS_KEY, STANDALONE_KEY, NOTIF_IDS_KEY, LIBRARY_KEY, JOURNAL_TYPES_KEY, MOODS_KEY, CORE_CATEGORIES_KEY, SNAPSHOTS_KEY, MONTHLY_INTENTION_KEY, ONBOARDED_KEY, 'grimoire_spell_research']);
     await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
@@ -811,6 +820,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       moods, addMood, deleteMood,
       coreCategories, setCoreCategories: updateCoreCategories,
       monthlySnapshots, currentMonthIntention, setMonthlyIntention, monthlyStreak,
+      saveReflection,
       isOnboarded, markOnboarded,
       clearAllData,
     }}>

@@ -47,12 +47,14 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const { showAlert } = useAlert();
   const ritual = rituals.find(r => r.id === id);
   const editDateOptions: Date[] = [];
-const editDateStart = new Date();
-for (let i = 0; i < 90; i++) {
-  const d = new Date(editDateStart);
-  d.setDate(d.getDate() + i);
-  editDateOptions.push(d);
-}
+  const editDateStart = new Date();
+  editDateStart.setHours(0, 0, 0, 0);
+  editDateStart.setDate(editDateStart.getDate() - 30); // allow 30 days back
+  for (let i = 0; i < 121; i++) { // 30 past + today + 90 future
+    const d = new Date(editDateStart);
+    d.setDate(d.getDate() + i);
+    editDateOptions.push(d);
+  }
 
   if (!ritual) {
     return (

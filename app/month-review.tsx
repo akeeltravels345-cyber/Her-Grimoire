@@ -20,7 +20,7 @@ const MONTH_NAMES = [
 export default function MonthReviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { monthlySnapshots, manifestations } = useApp();
+  const { monthlySnapshots, manifestations, saveReflection } = useApp();
 
   const now = new Date();
   const nextMonthName = MONTH_NAMES[(now.getMonth() + 1) % 12];
@@ -40,9 +40,13 @@ export default function MonthReviewScreen() {
     });
   });
 
-  const [reflection, setReflection] = useState('');
+  const [reflection, setReflection] = useState(snapshot?.reflection || '');
 
   const handleClose = () => {
+    // Save reflection before navigating
+    if (snapshot && reflection.trim()) {
+      saveReflection(snapshot.month, reflection.trim());
+    }
     Haptics.selectionAsync();
     router.push('/monthly-intention');
   };
@@ -212,7 +216,13 @@ export default function MonthReviewScreen() {
               </LinearGradient>
             </Pressable>
 
-            <Pressable onPress={() => router.back()} style={styles.skipLink}>
+            <Pressable
+              onPress={() => {
+                if (snapshot && reflection.trim()) saveReflection(snapshot.month, reflection.trim());
+                router.back();
+              }}
+              style={styles.skipLink}
+            >
               <Text style={styles.skipLinkText}>Skip for now</Text>
             </Pressable>
           </ScrollView>

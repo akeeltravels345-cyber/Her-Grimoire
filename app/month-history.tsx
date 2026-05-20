@@ -110,6 +110,22 @@ function SnapshotCard({ snap, defaultExpanded = false }: { snap: MonthlySnapshot
               </View>
             ) : null}
 
+            {/* Release */}
+            {snap.release ? (
+              <View style={[styles.intentionBox, { borderColor: 'rgba(184,176,232,0.18)', backgroundColor: 'rgba(184,176,232,0.07)' }]}>
+                <Text style={[styles.intentionBoxLabel, { color: theme.accent }]}>Released</Text>
+                <Text style={styles.intentionBoxText}>"{snap.release}"</Text>
+              </View>
+            ) : null}
+
+            {/* Reflection */}
+            {snap.reflection ? (
+              <View style={[styles.intentionBox, { borderColor: 'rgba(126,212,168,0.18)', backgroundColor: 'rgba(126,212,168,0.07)' }]}>
+                <Text style={[styles.intentionBoxLabel, { color: theme.success }]}>What shifted</Text>
+                <Text style={styles.intentionBoxText}>{snap.reflection}</Text>
+              </View>
+            ) : null}
+
             {/* Core categories */}
             {snap.coreCategoryResults.length > 0 && (
               <View style={styles.expandedBlock}>

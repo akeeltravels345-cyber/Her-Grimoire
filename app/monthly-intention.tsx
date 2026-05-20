@@ -122,7 +122,7 @@ export default function MonthlyIntentionScreen() {
 
   const handleFinish = () => {
     // Save intention
-    setMonthlyIntention(callIn.trim(), anchor.trim());
+    setMonthlyIntention(callIn.trim(), release.trim(), anchor.trim());
 
     // Schedule queued rituals
     queuedRituals.forEach(r => {
