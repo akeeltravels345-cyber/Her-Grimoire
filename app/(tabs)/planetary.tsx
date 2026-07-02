@@ -10,6 +10,7 @@ import { getPlanetaryHours, getCurrentPlanetaryHour, formatHourTime, getUserTime
 import GradientScreen from '../../components/GradientScreen';
 import PlanetVisual from '../../components/PlanetVisual';
 import MoonVisual from '../../components/MoonVisual';
+import { formatFullDate, formatDateWithLongDay, formatWeekdayNarrow } from '../../utils/dateHelpers';
 
 // ═══ MOON PHASE CALCULATIONS ═══
 const REFERENCE_NEW_MOON = new Date('2024-01-11').getTime();
@@ -47,7 +48,7 @@ function getNextPhaseDate(fromDate: Date, targetAge: number): Date {
 }
 
 function formatLunarDate(date: Date): string {
-  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return formatFullDate(date);
 }
 
 // ═══ ECLIPSE DATA ═══
@@ -95,6 +96,12 @@ export default function PlanetaryScreen() {
   }, []);
 
   useEffect(() => {
+    if (tab === 'moon') {
+      setScreenTab('moon');
+    }
+  }, [tab]);
+
+  useEffect(() => {
     const targetDate = getDateForDay(selectedDay);
     const allHours = getPlanetaryHours(targetDate);
     if (!isToday) allHours.forEach(h => { h.isCurrent = false; });
@@ -111,7 +118,7 @@ export default function PlanetaryScreen() {
   const dayAbbrevs = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   const handleWeekDayTap = (dayIndex: number) => { setSelectedDay(dayIndex); setHourTab('day'); Haptics.selectionAsync(); };
-  const selectedDateStr = getDateForDay(selectedDay).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const selectedDateStr = formatDateWithLongDay(getDateForDay(selectedDay));
 
   // ═══ Moon Tab Data ═══
   const now = useMemo(() => new Date(), []);
@@ -242,7 +249,7 @@ export default function PlanetaryScreen() {
             return (
               <View key={i} style={[styles.moonStripDay, isToday2 && styles.moonStripDayToday, isKeyPhase && styles.moonStripDayKey]}>
                 <Text style={[styles.moonStripDayAbbr, isToday2 && { color: theme.primary }]}>
-                  {day.date.toLocaleDateString('en-US', { weekday: 'narrow' })}
+                  {formatWeekdayNarrow(day.date)}
                 </Text>
                 <Text style={[styles.moonStripDayNum, isToday2 && { color: theme.primary }]}>
                   {day.date.getDate()}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet, Platform,
   KeyboardAvoidingView, ScrollView,
@@ -20,34 +20,61 @@ const MONTH_NAMES = [
 export default function MonthReviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { monthlySnapshots, manifestations, saveReflection } = useApp();
+  const { monthlySnapshots, manifestations, saveReflection, setViewingMonthDirect } = useApp();
 
+  // Month-review always shows the current month (the one closing)
+  // Use local state to track which month we're reviewing within this screen
   const now = new Date();
-  const nextMonthName = MONTH_NAMES[(now.getMonth() + 1) % 12];
+  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [reviewingMonth, setReviewingMonth] = useState(currentMonthStr);
 
-  // Find last month's snapshot
-  const prevMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
-  const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-  const prevMonthStr = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}`;
-  const snapshot = monthlySnapshots.find(s => s.month === prevMonthStr) || monthlySnapshots[0];
+  // The month closing is what we're reviewing (defaults to today, can navigate back/forward)
+  const snapshot = monthlySnapshots.find(s => s.month === reviewingMonth);
 
-  // Manifestations logged last month
-  const lastMonthManifested = manifestations.filter(m => {
+  // Calculate month label and next month name from reviewingMonth
+  const [reviewYear, reviewMonthNum] = reviewingMonth.split('-');
+  const reviewMonthIndex = parseInt(reviewMonthNum) - 1;
+  const reviewMonthLabel = `${MONTH_NAMES[reviewMonthIndex]} ${reviewYear}`;
+
+  const nextMonthIndex = (reviewMonthIndex + 1) % 12;
+  const nextYear = nextMonthIndex === 0 ? parseInt(reviewYear) + 1 : parseInt(reviewYear);
+  const nextMonthName = MONTH_NAMES[nextMonthIndex];
+
+  // Manifestations logged in the reviewing month
+  const monthManifested = manifestations.filter(m => {
     if (!m.results || m.results.length === 0) return false;
     return m.results.some(r => {
       const d = new Date(r.date);
-      return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+      const resultMonthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return resultMonthStr === reviewingMonth;
     });
   });
 
   const [reflection, setReflection] = useState(snapshot?.reflection || '');
 
+  // Update reflection when reviewing month changes
+  useEffect(() => {
+    setReflection(snapshot?.reflection || '');
+  }, [reviewingMonth, snapshot?.reflection]);
+
   const handleClose = () => {
-    // Save reflection before navigating
-    if (snapshot && reflection.trim()) {
-      saveReflection(snapshot.month, reflection.trim());
+    // Save reflection for the reviewing month (always save if text exists, don't require snapshot to exist)
+    if (reflection.trim()) {
+      saveReflection(reviewingMonth, reflection.trim());
     }
     Haptics.selectionAsync();
+
+    // Calculate next month and set it as viewingMonth for monthly-intention
+    const [reviewYear, reviewMonthNum] = reviewingMonth.split('-');
+    let nextMonthNum = parseInt(reviewMonthNum) + 1;
+    let nextYear = parseInt(reviewYear);
+    if (nextMonthNum > 12) {
+      nextMonthNum = 1;
+      nextYear += 1;
+    }
+    const nextMonthStr = `${nextYear}-${String(nextMonthNum).padStart(2, '0')}`;
+    setViewingMonthDirect(nextMonthStr);
+
     router.push('/monthly-intention');
   };
 
@@ -88,15 +115,42 @@ export default function MonthReviewScreen() {
               </Pressable>
             </View>
 
+            {/* Month navigation */}
+            <View style={styles.monthNav}>
+              <Pressable onPress={() => {
+                // Navigate backwards from the currently viewing month
+                let prevMonthNum = parseInt(reviewMonthNum) - 1;
+                let prevYear = parseInt(reviewYear);
+                if (prevMonthNum < 1) {
+                  prevMonthNum = 12;
+                  prevYear -= 1;
+                }
+                setReviewingMonth(`${prevYear}-${String(prevMonthNum).padStart(2, '0')}`);
+              }} hitSlop={12}>
+                <MaterialIcons name="chevron-left" size={24} color={theme.primary} />
+              </Pressable>
+              <Text style={styles.monthNavLabel}>{reviewMonthLabel}</Text>
+              <Pressable onPress={() => {
+                // Navigate forwards from the currently viewing month
+                let nextMonthNum = parseInt(reviewMonthNum) + 1;
+                let nextYear = parseInt(reviewYear);
+                if (nextMonthNum > 12) {
+                  nextMonthNum = 1;
+                  nextYear += 1;
+                }
+                setReviewingMonth(`${nextYear}-${String(nextMonthNum).padStart(2, '0')}`);
+              }} hitSlop={12}>
+                <MaterialIcons name="chevron-right" size={24} color={theme.primary} />
+              </Pressable>
+            </View>
+
             {/* Title */}
-            <Text style={styles.eyebrow}>Your chapter closes</Text>
+            <Text style={styles.eyebrow}>This chapter is closing</Text>
             <Text style={styles.monthTitle}>
-              {snapshot?.label || `${MONTH_NAMES[prevMonth]} ${prevYear}`}
+              {reviewMonthLabel}
             </Text>
 
             <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerGlyph}>✦</Text>
               <View style={styles.dividerLine} />
             </View>
 
@@ -120,11 +174,11 @@ export default function MonthReviewScreen() {
                     <Text style={[styles.statValue, { color: completionColor }]}>{snapshot.completionRate}%</Text>
                     <Text style={styles.statLabel}>Done</Text>
                   </View>
-                  {lastMonthManifested.length > 0 && (
+                  {monthManifested.length > 0 && (
                     <>
                       <View style={styles.statDivider} />
                       <View style={styles.statItem}>
-                        <Text style={[styles.statValue, { color: '#4EA8DE' }]}>{lastMonthManifested.length}</Text>
+                        <Text style={[styles.statValue, { color: '#4EA8DE' }]}>{monthManifested.length}</Text>
                         <Text style={styles.statLabel}>Manifested</Text>
                       </View>
                     </>
@@ -212,7 +266,7 @@ export default function MonthReviewScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.nextMonthBtnGradient}
               >
-                <Text style={styles.nextMonthBtnText}>Step into {nextMonthName} ✦</Text>
+                <Text style={styles.nextMonthBtnText}>Step into {nextMonthName}</Text>
               </LinearGradient>
             </Pressable>
 
@@ -237,6 +291,9 @@ const serifFont = theme.fonts.serif;
 const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 8, marginBottom: 16 },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+
+  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 16 },
+  monthNavLabel: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, textAlign: 'center', minWidth: 120 },
 
   eyebrow: { fontSize: 12, fontWeight: '700', color: '#C9A84C', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 8 },
   monthTitle: { fontSize: 32, fontWeight: '700', color: '#F5D5E0', textAlign: 'center', fontFamily: serifFont, textShadowColor: 'rgba(201,168,76,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20, marginBottom: 20 },

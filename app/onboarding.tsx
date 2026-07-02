@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { theme } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
-import { DEFAULT_CATEGORIES, DEFAULT_CATEGORY_COLORS } from '../constants/config';
+import { DEFAULT_CATEGORIES, DEFAULT_CATEGORY_COLORS, DEFAULT_DEITY_COLORS, AVAILABLE_ICONS, AVAILABLE_COLORS } from '../constants/config';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const PROFILE_KEY = 'grimoire_profile';
@@ -132,11 +132,11 @@ function CategoryCard({ cat, selected, onToggle }: {
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
-const TOTAL_STEPS = 5; // 0=welcome 1=name 2=path+level 3=pillars 4=ready
+const TOTAL_STEPS = 6; // 0=welcome 1=name 2=path+level 3=pillars 4=deities 5=ready
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { setCoreCategories, markOnboarded } = useApp();
+  const { setCoreCategories, markOnboarded, addDeity } = useApp();
 
   const [step, setStep] = useState(0);
   const [firstName, setFirstName] = useState('');
@@ -144,6 +144,8 @@ export default function OnboardingScreen() {
   const [customTradition, setCustomTradition] = useState('');
   const [experienceLevel, setExperienceLevel] = useState('');
   const [selectedCats, setSelectedCats] = useState<string[]>([]);
+  const [selectedDeities, setSelectedDeities] = useState<string[]>([]);
+  const [currentDeityInput, setCurrentDeityInput] = useState('');
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -170,6 +172,20 @@ export default function OnboardingScreen() {
     setSelectedCats(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   };
 
+  const addDeityName = () => {
+    const trimmed = currentDeityInput.trim();
+    if (trimmed.length > 0 && !selectedDeities.includes(trimmed)) {
+      Haptics.selectionAsync();
+      setSelectedDeities(prev => [...prev, trimmed]);
+      setCurrentDeityInput('');
+    }
+  };
+
+  const removeDeityName = (name: string) => {
+    Haptics.selectionAsync();
+    setSelectedDeities(prev => prev.filter(d => d !== name));
+  };
+
   const selectTradition = (t: string) => {
     Haptics.selectionAsync();
     setTradition(t === tradition ? '' : t);
@@ -182,24 +198,63 @@ export default function OnboardingScreen() {
   };
 
   const handleFinish = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    try {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    const resolvedTradition = tradition === 'Other' ? customTradition.trim() : tradition;
+      const resolvedTradition = tradition === 'Other' ? customTradition.trim() : tradition;
 
-    // Persist full profile
-    const existing = await AsyncStorage.getItem(PROFILE_KEY);
-    const profile = existing ? JSON.parse(existing) : {};
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify({
-      ...profile,
-      firstName: firstName.trim(),
-      tradition: resolvedTradition,
-      experienceLevel,
-    }));
+      // Persist full profile
+      const existing = await AsyncStorage.getItem(PROFILE_KEY);
+      const profile = existing ? (() => {
+        try {
+          return JSON.parse(existing);
+        } catch (e) {
+          console.warn('[onboarding] Failed to parse existing profile:', e);
+          return {};
+        }
+      })() : {};
 
-    const cats = selectedCats.length > 0 ? selectedCats : DEFAULT_CATEGORIES.slice(0, 3).map(c => c.id);
-    setCoreCategories(cats);
-    markOnboarded();
-    router.replace('/(tabs)');
+      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify({
+        ...profile,
+        firstName: firstName.trim(),
+        tradition: resolvedTradition,
+        experienceLevel,
+      }));
+
+      const cats = selectedCats.length > 0 ? selectedCats : DEFAULT_CATEGORIES.slice(0, 3).map(c => c.id);
+      setCoreCategories(cats);
+
+      // Add selected deities (custom names from user input)
+      selectedDeities.forEach(deityName => {
+        addDeity({
+          id: deityName.toLowerCase().replace(/\s+/g, '_'),
+          name: deityName,
+          icon: 'flare',
+          description: `Personal deity or spiritual guide`,
+        });
+      });
+
+      markOnboarded();
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.error('[onboarding] Error saving profile:', error);
+      // Continue anyway - user can still use the app with defaults
+      const cats = selectedCats.length > 0 ? selectedCats : DEFAULT_CATEGORIES.slice(0, 3).map(c => c.id);
+      setCoreCategories(cats);
+
+      // Add selected deities (custom names from user input)
+      selectedDeities.forEach(deityName => {
+        addDeity({
+          id: deityName.toLowerCase().replace(/\s+/g, '_'),
+          name: deityName,
+          icon: 'flare',
+          description: `Personal deity or spiritual guide`,
+        });
+      });
+
+      markOnboarded();
+      router.replace('/(tabs)');
+    }
   };
 
   const nameOk = firstName.trim().length > 0;
@@ -222,7 +277,7 @@ export default function OnboardingScreen() {
       </View>
 
       <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'position'}>
 
           {/* Top bar */}
           <View style={styles.topRow}>
@@ -265,7 +320,7 @@ export default function OnboardingScreen() {
                 <Pressable style={styles.btn} onPress={next}>
                   <LinearGradient colors={[theme.primary + 'EE', theme.primaryDark + 'EE']}
                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
-                    <Text style={styles.btnText}>Begin your practice ✦</Text>
+                    <Text style={styles.btnText}>Begin your practice</Text>
                   </LinearGradient>
                 </Pressable>
               </ScrollView>
@@ -274,7 +329,7 @@ export default function OnboardingScreen() {
             {/* ─────────────── STEP 1 — Name ─────────────── */}
             {step === 1 && (
               <View style={styles.stepWrap}>
-                <Text style={styles.stepGlyph}>✦</Text>
+                <Text style={styles.stepGlyph}></Text>
                 <Text style={styles.stepTitle}>What shall we call you?</Text>
                 <Text style={styles.stepSub}>Your name or craft name. This is your space.</Text>
 
@@ -378,7 +433,7 @@ export default function OnboardingScreen() {
             {/* ─────────────── STEP 3 — Pillars ─────────────── */}
             {step === 3 && (
               <View style={[styles.stepWrap, { flex: 1 }]}>
-                <Text style={styles.stepGlyph}>✦</Text>
+                <Text style={styles.stepGlyph}></Text>
                 <Text style={styles.stepTitle}>Your sacred pillars</Text>
                 <Text style={styles.stepSub}>Choose the areas you want to track each month. Adjust anytime.</Text>
 
@@ -412,10 +467,95 @@ export default function OnboardingScreen() {
               </View>
             )}
 
-            {/* ─────────────── STEP 4 — Ready ─────────────── */}
+            {/* ─────────────── STEP 4 — Deities ─────────────── */}
             {step === 4 && (
+              <View style={[styles.stepWrap, { flex: 1 }]}>
+                <Text style={styles.stepGlyph}>✦</Text>
+                <Text style={styles.stepTitle}>Your spiritual allies</Text>
+                <Text style={styles.stepSub}>Add the names of deities, spirits, or guides you work with.</Text>
+
+                <ScrollView style={{ flex: 1, width: '100%' }} showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled">
+
+                  {/* Input field for deity names */}
+                  <View style={styles.inputBox}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TextInput
+                        style={[styles.inlineInput, { flex: 1 }]}
+                        value={currentDeityInput}
+                        onChangeText={setCurrentDeityInput}
+                        placeholder="e.g., Hecate, Brigid, Odin..."
+                        placeholderTextColor={theme.textMuted}
+                        returnKeyType="done"
+                        onSubmitEditing={addDeityName}
+                      />
+                      <Pressable
+                        style={[styles.addDeityBtn, !currentDeityInput.trim() && { opacity: 0.5 }]}
+                        onPress={addDeityName}
+                        disabled={!currentDeityInput.trim()}
+                      >
+                        <MaterialIcons name="add" size={20} color={theme.background} />
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Display added deities as chips */}
+                  {selectedDeities.length > 0 && (
+                    <View style={{ marginTop: 16, marginBottom: 16 }}>
+                      <Text style={styles.fieldLabel}>YOUR ALLIES ({selectedDeities.length})</Text>
+                      <View style={[styles.chipWrap, { marginTop: 8 }]}>
+                        {selectedDeities.map(deityName => (
+                          <View
+                            key={deityName}
+                            style={{
+                              backgroundColor: theme.primary + '22',
+                              borderColor: theme.primary + '50',
+                              borderWidth: 1,
+                              borderRadius: 20,
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '500' }}>
+                              {deityName}
+                            </Text>
+                            <Pressable
+                              onPress={() => removeDeityName(deityName)}
+                              hitSlop={6}
+                            >
+                              <MaterialIcons name="close" size={16} color={theme.primary} />
+                            </Pressable>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={{ height: 120 }} />
+                </ScrollView>
+
+                <View style={styles.stickyBottom}>
+                  <Pressable style={styles.btn} onPress={next}>
+                    <LinearGradient colors={[theme.primary + 'EE', theme.primaryDark + 'EE']}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+                      <Text style={styles.btnText}>
+                        {selectedDeities.length > 0
+                          ? `Add ${selectedDeities.length} guide${selectedDeities.length > 1 ? 's' : ''}`
+                          : 'Skip for now'}
+                      </Text>
+                    </LinearGradient>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* ─────────────── STEP 5 — Ready ─────────────── */}
+            {step === 5 && (
               <ScrollView contentContainerStyle={styles.stepWrap} showsVerticalScrollIndicator={false}>
-                <Text style={styles.readyGlyph}>✦</Text>
+                <Text style={styles.readyGlyph}></Text>
                 <Text style={styles.stepTitle}>Welcome, {displayName}.</Text>
                 <Text style={styles.stepSub}>Your grimoire is ready. Your practice starts now.</Text>
 
@@ -444,7 +584,7 @@ export default function OnboardingScreen() {
                 <Pressable style={styles.btn} onPress={handleFinish}>
                   <LinearGradient colors={[theme.primary + 'EE', theme.primaryDark + 'EE']}
                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
-                    <Text style={styles.btnText}>Enter the Grimoire ✦</Text>
+                    <Text style={styles.btnText}>Enter the Grimoire</Text>
                   </LinearGradient>
                 </Pressable>
               </ScrollView>
@@ -454,6 +594,29 @@ export default function OnboardingScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+  );
+}
+
+function SpiritualBeingCard({ name, description, icon, color, selected, onToggle }: {
+  name: string; description: string; icon: string; color: string; selected: boolean; onToggle: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onToggle}
+      style={[styles.catCard, selected && { borderColor: color, backgroundColor: color + '18' }]}
+    >
+      <View style={[styles.catIcon, { backgroundColor: color + '22' }]}>
+        <MaterialIcons name={icon as any} size={22} color={color} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.catName, selected && { color }]}>{name}</Text>
+        <Text style={styles.catDesc} numberOfLines={1}>{description}</Text>
+      </View>
+      {selected
+        ? <MaterialIcons name="check-circle" size={20} color={color} />
+        : <View style={styles.catUnchecked} />
+      }
+    </Pressable>
   );
 }
 
@@ -603,5 +766,9 @@ const styles = StyleSheet.create({
   btnText: {
     fontSize: 16, fontWeight: '700', color: '#F5D5E0',
     fontFamily: theme.fonts.serif, letterSpacing: 0.3,
+  },
+  addDeityBtn: {
+    width: 48, height: 48, borderRadius: 12,
+    backgroundColor: theme.primary, alignItems: 'center', justifyContent: 'center',
   },
 });

@@ -61,6 +61,46 @@ export const DEFAULT_CATEGORY_COLORS: Record<string, string> = {
   ancestral: '#E85D6F',
 };
 
+export const DEFAULT_DEITIES: PracticeCategory[] = [
+  {
+    id: 'ancestors',
+    name: 'Ancestors',
+    icon: 'star',
+    description: 'Your lineage, wisdom keepers, and ancestral guides',
+  },
+  {
+    id: 'hecate',
+    name: 'Hecate',
+    icon: 'nightlight-round',
+    description: 'Goddess of crossroads, magic, and the liminal spaces',
+  },
+];
+
+export const DEFAULT_DEITY_COLORS: Record<string, string> = {
+  spirit_guides: '#C9A0DC',
+  moon_goddess: '#B8B0E8',
+  sun_god: '#F59E0B',
+  ancestors: '#10B981',
+  ascended_masters: '#8B5CF6',
+  earth_goddess: '#5EBD8A',
+  divine_masculine: '#3B82F6',
+  divine_feminine: '#F472B6',
+  archangels: '#FBBF24',
+  nature_spirits: '#06B6D4',
+  hecate: '#8B5CF6',
+  'Spirit Guides': '#C9A0DC',
+  'Moon Goddess': '#B8B0E8',
+  'Sun God': '#F59E0B',
+  'Ancestors': '#10B981',
+  'Ascended Masters': '#8B5CF6',
+  'Earth Goddess': '#5EBD8A',
+  'Divine Masculine': '#3B82F6',
+  'Divine Feminine': '#F472B6',
+  'Archangels': '#FBBF24',
+  'Nature Spirits': '#06B6D4',
+  'Hecate': '#8B5CF6',
+};
+
 export const AVAILABLE_ICONS = [
   'auto-fix-high', 'paid', 'favorite', 'auto-awesome', 'shield', 'eco', 'visibility',
   'self-improvement', 'spa', 'local-fire-department', 'nightlight-round',

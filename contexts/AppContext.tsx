@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { Ritual, JournalEntry, ManifestationRecord, ManifestationResult, StandaloneJournalEntry, LibraryRitual } from '../services/mockData';
-import { PracticeCategory, DEFAULT_CATEGORIES, DEFAULT_CATEGORY_COLORS } from '../constants/config';
+import { Ritual, JournalEntry, ManifestationRecord, ManifestationResult, StandaloneJournalEntry, LibraryRitual, Deity } from '../services/mockData';
+import { PracticeCategory, DEFAULT_CATEGORIES, DEFAULT_CATEGORY_COLORS, DEFAULT_DEITIES, DEFAULT_DEITY_COLORS } from '../constants/config';
 
 export interface JournalEntryType {
   id: string;
@@ -11,9 +11,31 @@ export interface JournalEntryType {
   icon: string;
 }
 
-const DEFAULT_MOODS = ['Connected', 'Peaceful', 'Grateful', 'Reflective', 'Contemplative', 'Hopeful', 'Empowered', 'Joyful', 'Grounded', 'Centered', 'Elevated', 'Determined', 'Radiant', 'Mystified', 'Aware'];
+const DEFAULT_MOODS = ['Empowered', 'Aligned', 'Renewed', 'Elevated', 'Balanced', 'Connected', 'Transformed', 'Inspired', 'Grounded', 'Amazed', 'Peaceful'];
+const OLD_DEFAULT_MOODS = ['Peaceful', 'Grateful', 'Empowered', 'Grounded', 'Joyful', 'Connected']; // Old defaults for migration
+const NEW_ONLY_MOODS = ['Aligned', 'Renewed', 'Balanced', 'Transformed', 'Inspired', 'Amazed']; // Moods unique to new defaults
 const MOODS_KEY = 'grimoire_moods';
 const CORE_CATEGORIES_KEY = 'grimoire_core_categories';
+
+/**
+ * Migration: Reset moods if they're still the old defaults (with possible custom additions)
+ */
+function migrateMoodsData(loadedMoods: any[]): string[] {
+  if (!Array.isArray(loadedMoods) || loadedMoods.length === 0) {
+    return DEFAULT_MOODS;
+  }
+
+  // Check if we have at least 4 of the 6 old default moods (allows for some custom moods mixed in)
+  const oldDefaultCount = loadedMoods.filter(m => OLD_DEFAULT_MOODS.includes(m)).length;
+
+  // If we have 4+ of the old defaults, it's likely the old list - migrate to new defaults
+  if (oldDefaultCount >= 4) {
+    return DEFAULT_MOODS;
+  }
+
+  // Otherwise return as-is (likely mostly custom moods)
+  return loadedMoods;
+}
 
 const DEFAULT_JOURNAL_TYPES: JournalEntryType[] = [
   { id: 'reflection', label: 'Reflection', icon: '\u{1F4D6}' },
@@ -53,12 +75,14 @@ interface AppContextType {
   libraryRituals: LibraryRitual[];
   categories: PracticeCategory[];
   categoryColors: Record<string, string>;
+  deities: Deity[];
+  deityColors: Record<string, string>;
   manifestations: ManifestationRecord[];
   standaloneEntries: StandaloneJournalEntry[];
   isLoaded: boolean;
   addRitual: (ritual: Omit<Ritual, 'id' | 'createdAt' | 'timesPerformed' | 'journal'> & { status?: Ritual['status'] }) => void;
   updateRitual: (id: string, updates: Partial<Ritual>) => void;
-  deleteRitual: (id: string) => void;
+  deleteRitual: (id: string, deleteHistory?: boolean) => void;
   deleteFutureInSeries: (seriesId: string, fromDate: string) => void;
   deleteEntireSeries: (seriesId: string) => void;
   stopSchedule: (seriesId: string) => void;
@@ -66,11 +90,17 @@ interface AppContextType {
   updateJournalEntry: (ritualId: string, entryId: string, updates: Partial<JournalEntry>) => void;
   deleteJournalEntry: (ritualId: string, entryId: string) => void;
   updateStandaloneEntry: (id: string, updates: Partial<StandaloneJournalEntry>) => void;
-  addManifestationResult: (ritualId: string, note: string, date: string, type: 'sign' | 'manifested', signType?: import('../services/mockData').SignType) => void;
+  addManifestationResult: (ritualId: string, note: string, date: string, type: 'sign' | 'manifested', signType?: import('../services/mockData').SignType, imageUrl?: string) => void;
   deleteManifestationResult: (manifestationId: string, resultId: string) => void;
+  deleteManifestationRecord: (manifestationId: string) => void;
+  updateManifestation: (manifestationId: string, updates: { intention?: string; category?: string }) => void;
+  unspillManifestation: (manifestationId: string) => void;
+  undoLastManifestationAction: (manifestationId: string) => void;
   getManifestations: () => ManifestationRecord[];
   addCategory: (category: PracticeCategory, color: string) => void;
   deleteCategory: (categoryId: string) => void;
+  addDeity: (deity: Deity, color: string) => void;
+  deleteDeity: (deityId: string) => void;
   addStandaloneEntry: (entry: Omit<StandaloneJournalEntry, 'id'>) => void;
   deleteStandaloneEntry: (id: string) => void;
   updateStatus: (ritualId: string, status: 'scheduled' | 'approaching' | 'completed' | 'overdue' | 'dismissed') => void;
@@ -87,6 +117,12 @@ interface AppContextType {
   coreCategories: string[];
   setCoreCategories: (ids: string[]) => void;
   monthlySnapshots: MonthlySnapshot[];
+  monthlyIntentions: Record<string, { intention: string; release: string; ritualIntention: string; intentionSet: boolean; month: string }>;
+  viewingMonth: string;
+  setIntentionForMonth: (monthStr: string, intention: string, release: string, ritualIntention: string) => void;
+  getIntentionForMonth: (monthStr: string) => { intention: string; release: string; ritualIntention: string; intentionSet: boolean; month: string };
+  goToMonth: (offset: number) => void;
+  setViewingMonthDirect: (monthStr: string) => void;
   currentMonthIntention: { intention: string; release: string; ritualIntention: string; intentionSet: boolean; month: string };
   setMonthlyIntention: (intention: string, release: string, ritualIntention: string) => void;
   monthlyStreak: number;
@@ -101,6 +137,8 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const STORAGE_KEY = 'grimoire_rituals';
 const CATEGORIES_KEY = 'grimoire_categories';
 const COLORS_KEY = 'grimoire_category_colors';
+const DEITIES_KEY = 'grimoire_deities';
+const DEITY_COLORS_KEY = 'grimoire_deity_colors';
 const MANIFESTATIONS_KEY = 'grimoire_manifestations';
 const STANDALONE_KEY = 'grimoire_standalone_entries';
 const NOTIF_IDS_KEY = 'grimoire_notification_ids';
@@ -109,6 +147,8 @@ const JOURNAL_TYPES_KEY = 'grimoire_journal_types';
 const DATA_VERSION_KEY = 'grimoire_data_version';
 const SNAPSHOTS_KEY = 'grimoire_monthly_snapshots';
 const MONTHLY_INTENTION_KEY = 'grimoire_monthly_intention';
+const MONTHLY_INTENTIONS_KEY = 'grimoire_monthly_intentions';
+const VIEWING_MONTH_KEY = 'grimoire_viewing_month';
 const ONBOARDED_KEY = 'grimoire_onboarded';
 
 const CURRENT_DATA_VERSION = '4';
@@ -143,6 +183,141 @@ async function setStoredNotifIds(ids: Record<string, string[]>): Promise<void> {
   await AsyncStorage.setItem(NOTIF_IDS_KEY, JSON.stringify(ids));
 }
 
+/**
+ * Migration: Convert legacy single-value categories/moods to arrays
+ */
+function migrateRitualsData(rituals: any[]): Ritual[] {
+  return rituals.map(r => {
+    // Migrate category → categories
+    if (r.category && !r.categories) {
+      return {
+        ...r,
+        categories: [r.category],
+        category: undefined, // Remove legacy field
+        deities: r.deities || [],
+      };
+    }
+    // Ensure categories is always an array
+    if (!r.categories) {
+      return { ...r, categories: [], deities: r.deities || [] };
+    }
+    // Ensure deities is always an array
+    if (!r.deities) {
+      return { ...r, deities: [] };
+    }
+    return r;
+  });
+}
+
+function migrateLibraryRitualsData(rituals: any[]): LibraryRitual[] {
+  return rituals.map(r => {
+    // Migrate category → categories
+    if (r.category && !r.categories) {
+      return {
+        ...r,
+        categories: [r.category],
+        category: undefined, // Remove legacy field
+        deities: r.deities || [],
+      };
+    }
+    // Ensure categories is always an array
+    if (!r.categories) {
+      return { ...r, categories: [], deities: r.deities || [] };
+    }
+    // Ensure deities is always an array
+    if (!r.deities) {
+      return { ...r, deities: [] };
+    }
+    return r;
+  });
+}
+
+function migrateJournalEntriesData(entries: any[]): JournalEntry[] {
+  return entries.map(e => {
+    // Migrate mood → moods
+    if (e.mood && !e.moods) {
+      return {
+        ...e,
+        moods: [e.mood],
+        mood: undefined, // Remove legacy field
+      };
+    }
+    // Ensure moods is always an array
+    if (!e.moods) {
+      return { ...e, moods: [] };
+    }
+    return e;
+  });
+}
+
+function migrateStandaloneEntriesData(entries: any[]): StandaloneJournalEntry[] {
+  return entries.map(e => {
+    // Migrate mood → moods
+    if (e.mood && !e.moods) {
+      return {
+        ...e,
+        moods: [e.mood],
+        mood: undefined, // Remove legacy field
+      };
+    }
+    // Ensure moods is always an array (optional field)
+    if (e.moods === undefined) {
+      return { ...e, moods: [] };
+    }
+    return e;
+  });
+}
+
+function migrateManifestationsData(manifestations: any[]): ManifestationRecord[] {
+  return manifestations.map(m => {
+    // Migrate category → categories
+    if (m.category && !m.categories) {
+      return {
+        ...m,
+        categories: [m.category],
+        category: undefined, // Remove legacy field
+        deities: m.deities || [],
+      };
+    }
+    // Ensure categories is always an array
+    if (!m.categories) {
+      return { ...m, categories: [], deities: m.deities || [] };
+    }
+    // Ensure deities is always an array
+    if (!m.deities) {
+      return { ...m, deities: [] };
+    }
+    return m;
+  });
+}
+
+/**
+ * Migration: Reset deities to new defaults if they're all from the old auto-populated list
+ * Old IDs: spirit_guides, moon_goddess, sun_god, ascended_masters, earth_goddess,
+ *          divine_masculine, divine_feminine, archangels, nature_spirits, (ancestors was in old list too)
+ */
+function migrateDeities(stored: any[]): Deity[] {
+  if (!Array.isArray(stored) || stored.length === 0) {
+    return DEFAULT_DEITIES;
+  }
+
+  const oldAutoPopulatedIds = [
+    'spirit_guides', 'moon_goddess', 'sun_god', 'ascended_masters', 'earth_goddess',
+    'divine_masculine', 'divine_feminine', 'archangels', 'nature_spirits', 'ancestors'
+  ];
+
+  // Check if all stored deities are from the old auto-populated list
+  const allFromOldList = stored.every(d => oldAutoPopulatedIds.includes(d.id));
+
+  // If all are from the old list (meaning user never added custom deities), reset to new defaults
+  if (allFromOldList) {
+    return DEFAULT_DEITIES;
+  }
+
+  // Otherwise, keep the stored deities (user has custom deities mixed in)
+  return stored;
+}
+
 async function cancelNotificationsForRitual(ritualId: string): Promise<void> {
   const stored = await getStoredNotifIds();
   const ids = stored[ritualId] || [];
@@ -151,6 +326,14 @@ async function cancelNotificationsForRitual(ritualId: string): Promise<void> {
   }
   delete stored[ritualId];
   await setStoredNotifIds(stored);
+}
+
+/**
+ * Get current month as YYYY-MM string
+ */
+function getCurrentMonthStr(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 async function scheduleRemindersForRitual(ritual: { id: string; name: string; scheduledDate?: string; status: string }): Promise<void> {
@@ -245,6 +428,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [rituals, setRituals] = useState<Ritual[]>([]);
   const [categories, setCategories] = useState<PracticeCategory[]>(DEFAULT_CATEGORIES);
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>(DEFAULT_CATEGORY_COLORS);
+  const [deities, setDeities] = useState<Deity[]>(DEFAULT_DEITIES);
+  const [deityColors, setDeityColors] = useState<Record<string, string>>(DEFAULT_DEITY_COLORS);
   const [manifestations, setManifestations] = useState<ManifestationRecord[]>([]);
   const [standaloneEntries, setStandaloneEntries] = useState<StandaloneJournalEntry[]>([]);
   const [libraryRituals, setLibraryRituals] = useState<LibraryRitual[]>([]);
@@ -252,8 +437,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [moods, setMoods] = useState<string[]>(DEFAULT_MOODS);
   const [coreCategories, setCoreCategoriesState] = useState<string[]>([]);
   const [monthlySnapshots, setMonthlySnapshots] = useState<MonthlySnapshot[]>([]);
+  const [monthlyIntentions, setMonthlyIntentions] = useState<Record<string, { intention: string; release: string; ritualIntention: string; intentionSet: boolean; month: string }>>({});
+  const [viewingMonth, setViewingMonth] = useState<string>(getCurrentMonthStr());
   const [currentMonthIntention, setCurrentMonthIntention] = useState({ intention: '', release: '', ritualIntention: '', intentionSet: false, month: '' });
-  const [isOnboarded, setIsOnboarded] = useState(false);
+  // DEVELOPMENT: Set to true to skip onboarding during development
+  const [isOnboarded, setIsOnboarded] = useState(true);
   const [isLoaded, setIsLoaded] = useState(false);
   const hasRequestedPermissions = useRef(false);
 
@@ -284,24 +472,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const [ritualData, catData, colorData, manifData, standaloneData, libraryData] = await Promise.all([
+        const [ritualData, catData, colorData, deityData, deityColorData, manifData, standaloneData, libraryData] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEY),
           AsyncStorage.getItem(CATEGORIES_KEY),
           AsyncStorage.getItem(COLORS_KEY),
+          AsyncStorage.getItem(DEITIES_KEY),
+          AsyncStorage.getItem(DEITY_COLORS_KEY),
           AsyncStorage.getItem(MANIFESTATIONS_KEY),
           AsyncStorage.getItem(STANDALONE_KEY),
           AsyncStorage.getItem(LIBRARY_KEY),
         ]);
-        if (ritualData) { try { setRituals(JSON.parse(ritualData)); } catch {} }
+        if (ritualData) {
+          try {
+            const parsed = JSON.parse(ritualData);
+            const migrated = migrateRitualsData(parsed);
+            // Also migrate journal entries within each ritual
+            const withMigratedJournals = migrated.map(r => ({
+              ...r,
+              journal: migrateJournalEntriesData(r.journal || []),
+            }));
+            setRituals(withMigratedJournals);
+          } catch {}
+        }
         if (catData) { try { setCategories(JSON.parse(catData)); } catch {} }
         if (colorData) { try { setCategoryColors(JSON.parse(colorData)); } catch {} }
-        if (manifData) { try { setManifestations(JSON.parse(manifData)); } catch {} }
-        if (standaloneData) { try { setStandaloneEntries(JSON.parse(standaloneData)); } catch {} }
-        if (libraryData) { try { setLibraryRituals(JSON.parse(libraryData)); } catch {} }
+        if (deityData) {
+          try {
+            const parsed = JSON.parse(deityData);
+            const migrated = migrateDeities(parsed);
+            setDeities(migrated);
+          } catch {}
+        }
+        if (deityColorData) { try { setDeityColors(JSON.parse(deityColorData)); } catch {} }
+        if (manifData) {
+          try {
+            const parsed = JSON.parse(manifData);
+            const migrated = migrateManifestationsData(parsed);
+            setManifestations(migrated);
+          } catch {}
+        }
+        if (standaloneData) {
+          try {
+            const parsed = JSON.parse(standaloneData);
+            const migrated = migrateStandaloneEntriesData(parsed);
+            setStandaloneEntries(migrated);
+          } catch {}
+        }
+        if (libraryData) {
+          try {
+            const parsed = JSON.parse(libraryData);
+            const migrated = migrateLibraryRitualsData(parsed);
+            setLibraryRituals(migrated);
+          } catch {}
+        }
         const journalTypesData = await AsyncStorage.getItem(JOURNAL_TYPES_KEY);
         if (journalTypesData) { try { setJournalEntryTypes(JSON.parse(journalTypesData)); } catch {} }
         const moodsData = await AsyncStorage.getItem(MOODS_KEY);
-        if (moodsData) { try { setMoods(JSON.parse(moodsData)); } catch {} }
+        if (moodsData) {
+          try {
+            const loadedMoods = JSON.parse(moodsData);
+            const migratedMoods = migrateMoodsData(loadedMoods);
+            setMoods(migratedMoods);
+          } catch {
+            setMoods(DEFAULT_MOODS);
+          }
+        } else {
+          setMoods(DEFAULT_MOODS);
+        }
 
         // Load core categories
         const loadedCats: PracticeCategory[] = catData ? JSON.parse(catData) : DEFAULT_CATEGORIES;
@@ -330,9 +567,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const intentionData = await AsyncStorage.getItem(MONTHLY_INTENTION_KEY);
         if (intentionData) { try { setCurrentMonthIntention(JSON.parse(intentionData)); } catch {} }
 
-        // Onboarding flag
+        // Load monthly intentions (by month)
+        const monthlyIntentionsData = await AsyncStorage.getItem(MONTHLY_INTENTIONS_KEY);
+        if (monthlyIntentionsData) { try { setMonthlyIntentions(JSON.parse(monthlyIntentionsData)); } catch {} }
+
+        // Load viewing month preference
+        const viewingMonthData = await AsyncStorage.getItem(VIEWING_MONTH_KEY);
+        if (viewingMonthData) { try { setViewingMonth(viewingMonthData); } catch {} }
+
+        // Onboarding flag - default to true (skip onboarding during development)
         const onboardedFlag = await AsyncStorage.getItem(ONBOARDED_KEY);
-        if (onboardedFlag === 'true') setIsOnboarded(true);
+        if (onboardedFlag === 'true') {
+          setIsOnboarded(true);
+        } else if (onboardedFlag === null) {
+          // First load - set to true to skip onboarding during development
+          setIsOnboarded(true);
+          await AsyncStorage.setItem(ONBOARDED_KEY, 'true');
+        }
       } catch {}
       setIsLoaded(true);
     })();
@@ -352,6 +603,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [rituals, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories)); }, [categories, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(COLORS_KEY, JSON.stringify(categoryColors)); }, [categoryColors, isLoaded]);
+  useEffect(() => { if (isLoaded) AsyncStorage.setItem(DEITIES_KEY, JSON.stringify(deities)); }, [deities, isLoaded]);
+  useEffect(() => { if (isLoaded) AsyncStorage.setItem(DEITY_COLORS_KEY, JSON.stringify(deityColors)); }, [deityColors, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(MANIFESTATIONS_KEY, JSON.stringify(manifestations)); }, [manifestations, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(STANDALONE_KEY, JSON.stringify(standaloneEntries)); }, [standaloneEntries, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(libraryRituals)); }, [libraryRituals, isLoaded]);
@@ -360,120 +613,242 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(CORE_CATEGORIES_KEY, JSON.stringify(coreCategories)); }, [coreCategories, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(monthlySnapshots)); }, [monthlySnapshots, isLoaded]);
   useEffect(() => { if (isLoaded) AsyncStorage.setItem(MONTHLY_INTENTION_KEY, JSON.stringify(currentMonthIntention)); }, [currentMonthIntention, isLoaded]);
+  useEffect(() => { if (isLoaded) AsyncStorage.setItem(MONTHLY_INTENTIONS_KEY, JSON.stringify(monthlyIntentions)); }, [monthlyIntentions, isLoaded]);
+  useEffect(() => { if (isLoaded) AsyncStorage.setItem(VIEWING_MONTH_KEY, viewingMonth); }, [viewingMonth, isLoaded]);
+
+  // Check for rituals that should now have manifestations created (rituals scheduled for current month)
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Find rituals scheduled for current month that don't have manifestations yet
+    const ritualsNeedingManifest = rituals.filter(ritual => {
+      if (!ritual.tangibleOutcome || ritual.tangibleOutcome.trim().length === 0) return false;
+      if (!ritual.scheduledDate) return false;
+
+      const ritualDate = new Date(ritual.scheduledDate);
+      const ritualMonth = ritualDate.getMonth();
+      const ritualYear = ritualDate.getFullYear();
+
+      // Check if ritual is in current month
+      const isCurrentMonth = (ritualYear === currentYear && ritualMonth === currentMonth);
+      if (!isCurrentMonth) return false;
+
+      // Check if manifestation already exists
+      // For series/group rituals, check by seriesId/groupId; for single rituals, check by ritualId
+      if (ritual.seriesId) {
+        const hasManifest = manifestations.some(m => m.id === 'mf_series_' + ritual.seriesId);
+        return !hasManifest;
+      } else if (ritual.groupId) {
+        const hasManifest = manifestations.some(m => m.id === 'mf_group_' + ritual.groupId);
+        return !hasManifest;
+      } else {
+        const hasManifest = manifestations.some(m => m.ritualId === ritual.id);
+        return !hasManifest;
+      }
+    });
+
+    // Create manifestations for rituals that need them (one per series, one per group, one per non-series ritual)
+    if (ritualsNeedingManifest.length > 0) {
+      // Track which series/groups we've already created manifestations for
+      const seriesCreated = new Set<string>();
+      const groupsCreated = new Set<string>();
+      const newManifests = ritualsNeedingManifest
+        .filter(ritual => {
+          if (ritual.seriesId) {
+            if (seriesCreated.has(ritual.seriesId)) return false;
+            seriesCreated.add(ritual.seriesId);
+          } else if (ritual.groupId) {
+            if (groupsCreated.has(ritual.groupId)) return false;
+            groupsCreated.add(ritual.groupId);
+          }
+          return true;
+        })
+        .map(ritual => ({
+          id: ritual.seriesId ? 'mf_series_' + ritual.seriesId : ritual.groupId ? 'mf_group_' + ritual.groupId : 'mf_' + ritual.id,
+          ritualId: ritual.id,
+          ritualName: ritual.name,
+          intention: ritual.tangibleOutcome!.trim(),
+          categories: ritual.categories && ritual.categories.length > 0 ? ritual.categories : (ritual.category ? [ritual.category] : []),
+          deities: ritual.deities || [],
+          status: 'brewing' as const,
+          results: [],
+          createdAt: new Date().toISOString(),
+        }));
+
+      setManifestations(prev => [...newManifests, ...prev]);
+    }
+  }, [isLoaded, rituals, manifestations]);
+
+  // Clean up orphaned manifestations (ones whose ritualId no longer exists, or old duplicates from groups/series)
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    setManifestations(prev => {
+      const ritualIds = new Set(rituals.map(r => r.id));
+      const seriesIds = new Set(rituals.map(r => r.seriesId).filter(Boolean));
+      const groupIds = new Set(rituals.map(r => r.groupId).filter(Boolean));
+
+      return prev.filter(m => {
+        // Keep new-format series manifestations (mf_series_...)
+        if (m.id.startsWith('mf_series_')) {
+          const seriesId = m.id.replace('mf_series_', '');
+          return seriesIds.has(seriesId);
+        }
+        // Keep new-format group manifestations (mf_group_...)
+        if (m.id.startsWith('mf_group_')) {
+          const groupId = m.id.replace('mf_group_', '');
+          return groupIds.has(groupId);
+        }
+        // Keep single ritual manifestations if the ritual exists
+        return ritualIds.has(m.ritualId);
+      });
+    });
+  }, [isLoaded]);
 
   const addRitual = (ritual: Omit<Ritual, 'id' | 'createdAt' | 'timesPerformed' | 'journal'> & { status?: Ritual['status'] }) => {
+    console.log('[addRitual] Starting with ritual:', ritual);
     const id = Date.now().toString();
     const seriesId = 'series_' + id;
     const shouldPropagate = ['daily', 'weekly', 'monthly', 'moon_phase'].includes(ritual.schedule);
 
+    console.log('[addRitual] ID generated:', id, 'shouldPropagate:', shouldPropagate);
+
     const numConsecutive = ritual.consecutiveDays || 1;
     const groupId = numConsecutive > 1 ? 'group_' + id : undefined;
 
-    // --- Auto-link or auto-create library ritual ---
-    let resolvedLibraryId = ritual.libraryId;
-    if (!resolvedLibraryId) {
-      const alreadyInLibrary = libraryRituals.find(
-        r => r.name.toLowerCase().trim() === ritual.name.toLowerCase().trim()
-      );
-      if (alreadyInLibrary) {
-        resolvedLibraryId = alreadyInLibrary.id;
-      } else {
-        const libId = 'lib_' + Date.now().toString();
-        const newLibRitual: LibraryRitual = {
-          id: libId,
-          name: ritual.name,
-          category: ritual.category,
-          description: ritual.description || '',
-          intention: ritual.intention || '',
-          tangibleOutcome: ritual.tangibleOutcome || '',
-          ingredients: ritual.ingredients,
-          schedule: ritual.schedule,
-          scheduleDetail: ritual.scheduleDetail,
-          createdAt: new Date().toISOString(),
-          timesPerformed: 0,
-        };
-        setLibraryRituals(prev => [newLibRitual, ...prev]);
-        resolvedLibraryId = libId;
-      }
-    }
+    // Use the libraryId if provided, otherwise leave it undefined
+    // Library saving is now handled explicitly via the user dialog in add-ritual.tsx
+    const resolvedLibraryId = ritual.libraryId;
 
-    // --- Consecutive days mode: create a group of entries ---
-    if (numConsecutive > 1 && ritual.scheduledDate) {
-      const baseDate = new Date(ritual.scheduledDate);
-      const groupRituals: Ritual[] = [];
-
-      for (let i = 0; i < numConsecutive; i++) {
-        const d = new Date(baseDate);
-        d.setDate(d.getDate() + i);
-        groupRituals.push({
-          ...ritual,
-          id: i === 0 ? id : id + '_g' + (i + 1),
-          name: `${ritual.name} \u2014 Day ${i + 1} of ${numConsecutive}`,
-          groupId,
-          consecutiveDays: numConsecutive,
-          libraryId: resolvedLibraryId,
-          createdAt: new Date().toISOString(),
-          timesPerformed: 0,
-          journal: [],
-          status: 'scheduled',
-          scheduledDate: d.toISOString(),
-        });
-      }
-      setRituals(prev => [...groupRituals, ...prev]);
-    } else {
-      // --- Normal mode (single or schedule-propagated) ---
-      let newRitual: Ritual = {
-        ...ritual,
-        id,
-        libraryId: resolvedLibraryId,
-        createdAt: new Date().toISOString(),
-        timesPerformed: 0,
-        journal: [],
-        status: ritual.status || 'scheduled',
-        seriesId: shouldPropagate ? seriesId : undefined,
-      };
-
-      if (shouldPropagate && ritual.scheduledDate) {
+      // --- Consecutive days mode: create a group of entries ---
+      if (numConsecutive > 1 && ritual.scheduledDate) {
+        console.log('[addRitual] Entering consecutive days mode with numConsecutive:', numConsecutive);
         const baseDate = new Date(ritual.scheduledDate);
-        const futureDates = generatePropagationDates(ritual.schedule, baseDate);
-        const propagatedRituals: Ritual[] = [newRitual];
+        const groupRituals: Ritual[] = [];
 
-        for (let i = 0; i < futureDates.length; i++) {
-          propagatedRituals.push({
+        for (let i = 0; i < numConsecutive; i++) {
+          const d = new Date(baseDate);
+          d.setDate(d.getDate() + i);
+          groupRituals.push({
             ...ritual,
-            id: id + '_p' + (i + 1),
-            seriesId,
+            id: i === 0 ? id : id + '_g' + (i + 1),
+            name: `${ritual.name} \u2014 Day ${i + 1} of ${numConsecutive}`,
+            groupId,
+            consecutiveDays: numConsecutive,
             libraryId: resolvedLibraryId,
             createdAt: new Date().toISOString(),
             timesPerformed: 0,
             journal: [],
             status: 'scheduled',
-            scheduledDate: futureDates[i].toISOString(),
+            scheduledDate: d.toISOString(),
           });
         }
-        setRituals(prev => [...propagatedRituals, ...prev]);
+        console.log('[addRitual] Created', groupRituals.length, 'group rituals');
+        setRituals(prev => [...groupRituals, ...prev]);
       } else {
-        setRituals(prev => [newRitual, ...prev]);
-      }
-    }
+        console.log('[addRitual] Entering normal mode');
+        // --- Normal mode (single or schedule-propagated) ---
+        let newRitual: Ritual = {
+          ...ritual,
+          id,
+          libraryId: resolvedLibraryId,
+          createdAt: new Date().toISOString(),
+          timesPerformed: 0,
+          journal: [],
+          status: ritual.status || 'scheduled',
+          seriesId: shouldPropagate ? seriesId : undefined,
+        };
 
-    // Create manifestation only when tangibleOutcome is non-empty
-    const manifSource = (ritual.tangibleOutcome && ritual.tangibleOutcome.trim().length > 0)
-      ? ritual.tangibleOutcome.trim()
-      : '';
-    if (manifSource.length > 0) {
-      const newManif: ManifestationRecord = {
-        id: 'mf_' + id,
-        ritualId: id,
-        ritualName: ritual.name,
-        intention: manifSource,
-        category: ritual.category,
-        status: 'brewing',
-        results: [],
-        createdAt: new Date().toISOString(),
-      };
-      setManifestations(prev => [newManif, ...prev]);
-    }
+        if (shouldPropagate && ritual.scheduledDate) {
+          console.log('[addRitual] Creating propagated series with shouldPropagate:', shouldPropagate);
+          const baseDate = new Date(ritual.scheduledDate);
+          const futureDates = generatePropagationDates(ritual.schedule, baseDate);
+          console.log('[addRitual] Generated', futureDates.length, 'future dates');
+          const propagatedRituals: Ritual[] = [newRitual];
+
+          for (let i = 0; i < futureDates.length; i++) {
+            propagatedRituals.push({
+              ...ritual,
+              id: id + '_p' + (i + 1),
+              seriesId,
+              libraryId: resolvedLibraryId,
+              createdAt: new Date().toISOString(),
+              timesPerformed: 0,
+              journal: [],
+              status: 'scheduled',
+              scheduledDate: futureDates[i].toISOString(),
+            });
+          }
+          console.log('[addRitual] Setting', propagatedRituals.length, 'propagated rituals');
+          setRituals(prev => [...propagatedRituals, ...prev]);
+        } else {
+          console.log('[addRitual] Setting single new ritual');
+          setRituals(prev => [newRitual, ...prev]);
+        }
+      }
+
+      // Create manifestation with tangibleOutcome or ritual name as fallback
+      const manifSource = (ritual.tangibleOutcome && ritual.tangibleOutcome.trim().length > 0)
+        ? ritual.tangibleOutcome.trim()
+        : ritual.name; // Use ritual name as default intention
+
+      console.log('[addRitual] Manifestation source:', manifSource);
+
+      if (true) {  // Always create manifestation
+        // Check if ritual is scheduled for this month or earlier
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        let shouldCreateManif = true;
+        if (ritual.scheduledDate) {
+          const ritualDate = new Date(ritual.scheduledDate);
+          const ritualMonth = ritualDate.getMonth();
+          const ritualYear = ritualDate.getFullYear();
+
+          // Only create manifestation if ritual is in current month or earlier
+          shouldCreateManif = (ritualYear < currentYear) || (ritualYear === currentYear && ritualMonth <= currentMonth);
+          console.log('[addRitual] Manifestation date check:', { ritualDate, shouldCreateManif });
+        }
+
+        if (shouldCreateManif) {
+          // For series/group rituals, use seriesId/groupId as manifestation ID so all instances share one manifestation
+          // For non-series/group rituals, use ritual ID
+          // Use the local seriesId/groupId variables created in this function, not ritual properties
+          const manifId = groupId ? 'mf_group_' + groupId : (shouldPropagate ? 'mf_series_' + seriesId : 'mf_' + id);
+
+          // Check if manifestation already exists (for series/group, only create once)
+          const manifAlreadyExists = manifestations.some(m => m.id === manifId);
+
+          console.log('[addRitual] Manifestation creation:', { manifId, manifAlreadyExists });
+
+          if (!manifAlreadyExists) {
+            // Handle both old (category) and new (categories) formats
+            const categories = ritual.categories && ritual.categories.length > 0
+              ? ritual.categories
+              : (ritual.category ? [ritual.category] : []);
+
+            const newManif: ManifestationRecord = {
+              id: manifId,
+              ritualId: id, // Store the current (first) ritual ID for reference
+              ritualName: ritual.name,
+              intention: manifSource,
+              categories,
+              status: 'brewing',
+              results: [],
+              createdAt: new Date().toISOString(),
+            };
+            console.log('[addRitual] Creating new manifestation:', newManif);
+            setManifestations(prev => [newManif, ...prev]);
+          }
+        }
+      }
+
+    console.log('[addRitual] Complete');
   };
 
   const updateRitual = (id: string, updates: Partial<Ritual>) => {
@@ -483,15 +858,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const deleteRitual = (id: string) => {
+  const deleteRitual = (id: string, deleteHistory: boolean = true) => {
+    const ritual = rituals.find(r => r.id === id);
     cancelNotificationsForRitual(id);
     setRituals(prev => prev.filter(r => r.id !== id));
-    setManifestations(prev => prev.filter(m => m.ritualId !== id));
+    if (deleteHistory) {
+      // For series/group rituals, don't delete the shared manifestation here
+      // (they should be deleted via deleteEntireSeries or when all group members are gone)
+      // For non-series/group rituals, delete the manifestation by ritualId
+      if (!ritual?.seriesId && !ritual?.groupId) {
+        // For non-series/group rituals, delete by ritualId
+        setManifestations(prev => prev.filter(m => m.ritualId !== id));
+      }
+    }
+    // If deleteHistory is false, manifestations and journal entries are preserved
+    // (journal entries are on the ritual object but history is kept)
   };
 
   // Delete all future (unperformed) rituals in a series from a given date onward
   const deleteFutureInSeries = (seriesId: string, fromDate: string) => {
     const fromTime = new Date(fromDate).getTime();
+    // Capture ritual IDs before deletion to clean up manifestations
+    const ritualIdsToDelete = rituals
+      .filter(r =>
+        r.seriesId === seriesId &&
+        r.status !== 'completed' &&
+        r.scheduledDate &&
+        new Date(r.scheduledDate).getTime() >= fromTime
+      )
+      .map(r => r.id);
+
     setRituals(prev => {
       const toDelete = prev.filter(r =>
         r.seriesId === seriesId &&
@@ -502,20 +898,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toDelete.forEach(r => cancelNotificationsForRitual(r.id));
       return prev.filter(r => !toDelete.some(d => d.id === r.id));
     });
+
+    // Clean up manifestations: only delete series manifestation if entire series is gone
+    setManifestations(prev => {
+      // Check if any rituals remain in this series after deletion
+      const remainingInSeries = rituals.filter(r => r.seriesId === seriesId && !ritualIdsToDelete.includes(r.id));
+      const shouldDeleteSeriesManif = remainingInSeries.length === 0;
+
+      return prev.filter(m => {
+        // Delete series manifestation only if series is entirely gone
+        if (m.id === 'mf_series_' + seriesId && shouldDeleteSeriesManif) return false;
+        // Delete any orphaned ritual-specific manifestations
+        if (!ritualIdsToDelete.includes(m.ritualId)) return true;
+        return false;
+      });
+    });
   };
 
   // Delete every ritual in a series (keeps completed data via journal entries already logged)
   const deleteEntireSeries = (seriesId: string) => {
+    // Capture series ritual IDs before deletion
+    const seriesRitualIds = rituals.filter(r => r.seriesId === seriesId).map(r => r.id);
+
     setRituals(prev => {
       const toDelete = prev.filter(r => r.seriesId === seriesId);
       toDelete.forEach(r => cancelNotificationsForRitual(r.id));
       return prev.filter(r => r.seriesId !== seriesId);
     });
-    // Also clean up manifestations linked to any ritual in the series
-    setManifestations(prev => {
-      const seriesRitualIds = rituals.filter(r => r.seriesId === seriesId).map(r => r.id);
-      return prev.filter(m => !seriesRitualIds.includes(m.ritualId));
-    });
+    // Clean up manifestations: delete series manifestation and any orphaned ritual-specific ones
+    setManifestations(prev =>
+      prev.filter(m => m.id !== 'mf_series_' + seriesId && !seriesRitualIds.includes(m.ritualId))
+    );
   };
 
   // Stop a recurring schedule: delete all future unperformed rituals but keep completed/logged ones
@@ -573,13 +986,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStandaloneEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
   };
 
-  const addManifestationResult = (ritualId: string, note: string, date: string, type: 'sign' | 'manifested', signType?: import('../services/mockData').SignType) => {
+  const addManifestationResult = (ritualId: string, note: string, date: string, type: 'sign' | 'manifested', signType?: import('../services/mockData').SignType, imageUrl?: string) => {
     const newResult: ManifestationResult = {
       id: 'mr_' + Date.now().toString(),
       note,
       date,
       type,
       signType,
+      imageUrl,
     };
     setManifestations(prev => prev.map(m => {
       if (m.ritualId !== ritualId) return m;
@@ -592,10 +1006,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const updateManifestation = (manifestationId: string, updates: { intention?: string; category?: string }) => {
+    setManifestations(prev => prev.map(m => m.id !== manifestationId ? m : { ...m, ...updates }));
+  };
+
   const deleteManifestationResult = (manifestationId: string, resultId: string) => {
     setManifestations(prev => prev.map(m => {
       if (m.id !== manifestationId) return m;
       const newResults = m.results.filter(r => r.id !== resultId);
+      const newStatus: ManifestationRecord['status'] =
+        newResults.some(r => r.type === 'manifested') ? 'spilled' :
+        newResults.some(r => r.type === 'sign') ? 'stirring' : 'brewing';
+      return { ...m, results: newResults, status: newStatus };
+    }));
+  };
+
+  const deleteManifestationRecord = (manifestationId: string) => {
+    setManifestations(prev => prev.filter(m => m.id !== manifestationId));
+  };
+
+  const unspillManifestation = (manifestationId: string) => {
+    setManifestations(prev => prev.map(m => {
+      if (m.id !== manifestationId || m.status !== 'spilled') return m;
+      // Find and remove the spill result (the 'manifested' type result)
+      const newResults = m.results.filter(r => r.type !== 'manifested');
+      // Determine new status based on remaining results
+      const newStatus: ManifestationRecord['status'] =
+        newResults.some(r => r.type === 'sign') ? 'stirring' : 'brewing';
+      return { ...m, results: newResults, status: newStatus };
+    }));
+  };
+
+  const undoLastManifestationAction = (manifestationId: string) => {
+    setManifestations(prev => prev.map(m => {
+      if (m.id !== manifestationId || m.results.length === 0) return m;
+      // Remove the most recent result
+      const newResults = m.results.slice(0, -1);
+      // Recalculate status based on remaining results
       const newStatus: ManifestationRecord['status'] =
         newResults.some(r => r.type === 'manifested') ? 'spilled' :
         newResults.some(r => r.type === 'sign') ? 'stirring' : 'brewing';
@@ -615,6 +1062,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCategoryColors(prev => {
       const next = { ...prev };
       delete next[categoryId];
+      return next;
+    });
+  };
+
+  const addDeity = (deity: Deity, color: string) => {
+    setDeities(prev => [...prev, deity]);
+    setDeityColors(prev => ({ ...prev, [deity.id]: color }));
+  };
+
+  const deleteDeity = (deityId: string) => {
+    setDeities(prev => prev.filter(d => d.id !== deityId));
+    setDeityColors(prev => {
+      const next = { ...prev };
+      delete next[deityId];
       return next;
     });
   };
@@ -645,7 +1106,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteLibraryRitual = (id: string) => {
+    // Find all practice instances of this library ritual
+    const practiceInstances = rituals.filter(r => r.libraryId === id);
+
+    // Remove library ritual
     setLibraryRituals(prev => prev.filter(r => r.id !== id));
+
+    // Unlink practice instances (preserve history)
+    if (practiceInstances.length > 0) {
+      setRituals(prev => prev.map(r =>
+        practiceInstances.some(pi => pi.id === r.id)
+          ? { ...r, libraryId: undefined }
+          : r
+      ));
+    }
   };
 
   const addJournalEntryType = (type: JournalEntryType) => {
@@ -672,10 +1146,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCoreCategoriesState(valid);
   };
 
+  const setIntentionForMonth = (monthStr: string, intention: string, release: string, ritualIntention: string) => {
+    const intentionData = { intention, release, ritualIntention, intentionSet: true, month: monthStr };
+    setMonthlyIntentions(prev => ({
+      ...prev,
+      [monthStr]: intentionData
+    }));
+
+    // If setting intentions for the current month, also update currentMonthIntention
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (monthStr === currentMonth) {
+      setCurrentMonthIntention(intentionData);
+    }
+  };
+
+  const getIntentionForMonth = (monthStr: string) => {
+    return monthlyIntentions[monthStr] || { intention: '', release: '', ritualIntention: '', intentionSet: false, month: monthStr };
+  };
+
+  const goToMonth = (offset: number) => {
+    // Navigate relative to the currently viewing month, not relative to today
+    const [year, monthNum] = viewingMonth.split('-');
+    let targetMonth = parseInt(monthNum) + offset;
+    let targetYear = parseInt(year);
+
+    // Handle year rollover
+    while (targetMonth > 12) {
+      targetMonth -= 12;
+      targetYear += 1;
+    }
+    while (targetMonth < 1) {
+      targetMonth += 12;
+      targetYear -= 1;
+    }
+
+    const newMonth = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+    setViewingMonth(newMonth);
+  };
+
+  const setViewingMonthDirect = (monthStr: string) => {
+    setViewingMonth(monthStr);
+  };
+
   const setMonthlyIntention = (intention: string, release: string, ritualIntention: string) => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     setCurrentMonthIntention({ intention, release, ritualIntention, intentionSet: true, month });
+    // Also save to monthlyIntentions for the reworked system
+    setIntentionForMonth(month, intention, release, ritualIntention);
   };
 
   const createMonthlySnapshot = useCallback((year: number, month: number) => {
@@ -718,14 +1237,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+    // Get intention for this month from monthlyIntentions
+    const monthIntention = monthlyIntentions[monthStr] || { intention: '', release: '', ritualIntention: '', intentionSet: false, month: monthStr };
+
     const snapshot: MonthlySnapshot = {
       month: monthStr,
       label: `${monthNames[month]} ${year}`,
-      intention: currentMonthIntention.month === monthStr ? currentMonthIntention.intention : '',
-      release: currentMonthIntention.month === monthStr ? currentMonthIntention.release : '',
-      ritualIntention: currentMonthIntention.month === monthStr ? currentMonthIntention.ritualIntention : '',
+      intention: monthIntention.intention,
+      release: monthIntention.release,
+      ritualIntention: monthIntention.ritualIntention,
       reflection: '',
-      intentionSet: currentMonthIntention.month === monthStr ? currentMonthIntention.intentionSet : false,
+      intentionSet: monthIntention.intentionSet,
       coreCategoryResults,
       totalScheduled: monthRituals.length,
       totalCompleted: completed.length,
@@ -738,7 +1260,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     setMonthlySnapshots(prev => [snapshot, ...prev]);
-  }, [rituals, categories, coreCategories, monthlySnapshots, currentMonthIntention]);
+  }, [rituals, categories, coreCategories, monthlySnapshots, monthlyIntentions]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -761,13 +1283,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addToPractice = (libraryId: string, overrides?: { scheduledDate?: string; schedule?: LibraryRitual['schedule']; consecutiveDays?: number; tangibleOutcome?: string; scheduleDetail?: string }) => {
     const libRitual = libraryRituals.find(r => r.id === libraryId);
     if (!libRitual) return;
+    // Handle both legacy (category) and new (categories) formats
+    const categoryIds = libRitual.categories && libRitual.categories.length > 0 ? libRitual.categories : (libRitual.category ? [libRitual.category] : []);
     addRitual({
       name: libRitual.name,
-      category: libRitual.category,
+      categories: categoryIds,
       description: libRitual.description,
       intention: libRitual.intention,
       tangibleOutcome: overrides?.tangibleOutcome ?? libRitual.tangibleOutcome,
       ingredients: libRitual.ingredients,
+      imageUrl: libRitual.imageUrl,
+      referenceImages: libRitual.referenceImages,
       schedule: overrides?.schedule || libRitual.schedule,
       scheduleDetail: overrides?.scheduleDetail ?? libRitual.scheduleDetail,
       scheduledDate: overrides?.scheduledDate,
@@ -784,8 +1310,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const saveReflection = useCallback((month: string, reflection: string) => {
-    setMonthlySnapshots(prev => prev.map(s => s.month === month ? { ...s, reflection } : s));
-  }, []);
+    setMonthlySnapshots(prev => {
+      // Check if snapshot exists for this month
+      const exists = prev.some(s => s.month === month);
+      if (exists) {
+        // Update existing snapshot
+        return prev.map(s => s.month === month ? { ...s, reflection } : s);
+      } else {
+        // Create new snapshot if it doesn't exist
+        const [year, monthNum] = month.split('-');
+        const monthIndex = parseInt(monthNum) - 1;
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const newSnapshot: MonthlySnapshot = {
+          month,
+          label: `${monthNames[monthIndex]} ${year}`,
+          intention: monthlyIntentions[month]?.intention || '',
+          release: monthlyIntentions[month]?.release || '',
+          ritualIntention: monthlyIntentions[month]?.ritualIntention || '',
+          reflection,
+          intentionSet: monthlyIntentions[month]?.intentionSet || false,
+          coreCategoryResults: [],
+          totalScheduled: 0,
+          totalCompleted: 0,
+          totalMissed: 0,
+          completionRate: 0,
+          missedRituals: [],
+          completedRituals: [],
+          monthlyStreakCount: 0,
+          createdAt: new Date().toISOString(),
+        };
+        return [newSnapshot, ...prev];
+      }
+    });
+  }, [monthlyIntentions]);
 
   const markOnboarded = useCallback(() => {
     setIsOnboarded(true);
@@ -801,25 +1358,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMoods(DEFAULT_MOODS);
     setCoreCategoriesState([]);
     setMonthlySnapshots([]);
+    setMonthlyIntentions({});
+    setViewingMonth(getCurrentMonthStr());
     setCurrentMonthIntention({ intention: '', release: '', ritualIntention: '', intentionSet: false, month: '' });
     setIsOnboarded(false);
-    await AsyncStorage.multiRemove([STORAGE_KEY, MANIFESTATIONS_KEY, STANDALONE_KEY, NOTIF_IDS_KEY, LIBRARY_KEY, JOURNAL_TYPES_KEY, MOODS_KEY, CORE_CATEGORIES_KEY, SNAPSHOTS_KEY, MONTHLY_INTENTION_KEY, ONBOARDED_KEY, 'grimoire_spell_research']);
+    await AsyncStorage.multiRemove([STORAGE_KEY, MANIFESTATIONS_KEY, STANDALONE_KEY, NOTIF_IDS_KEY, LIBRARY_KEY, JOURNAL_TYPES_KEY, MOODS_KEY, CORE_CATEGORIES_KEY, SNAPSHOTS_KEY, MONTHLY_INTENTION_KEY, MONTHLY_INTENTIONS_KEY, VIEWING_MONTH_KEY, ONBOARDED_KEY, 'grimoire_spell_research']);
     await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
   };
 
   return (
     <AppContext.Provider value={{
-      rituals, libraryRituals, categories, categoryColors, manifestations, standaloneEntries, isLoaded,
+      rituals, libraryRituals, categories, categoryColors, deities, deityColors, manifestations, standaloneEntries, isLoaded,
       addRitual, updateRitual, deleteRitual, deleteFutureInSeries, deleteEntireSeries, stopSchedule,
       addJournalEntry, updateJournalEntry, deleteJournalEntry, updateStandaloneEntry,
-      addManifestationResult, deleteManifestationResult, getManifestations,
-      addCategory, deleteCategory,
+      addManifestationResult, deleteManifestationResult, deleteManifestationRecord, updateManifestation, unspillManifestation, undoLastManifestationAction, getManifestations,
+      addCategory, deleteCategory, addDeity, deleteDeity,
       addStandaloneEntry, deleteStandaloneEntry, updateStatus,
       addLibraryRitual, updateLibraryRitual, deleteLibraryRitual, addToPractice,
       journalEntryTypes, addJournalEntryType, deleteJournalEntryType,
       moods, addMood, deleteMood,
       coreCategories, setCoreCategories: updateCoreCategories,
-      monthlySnapshots, currentMonthIntention, setMonthlyIntention, monthlyStreak,
+      monthlySnapshots, monthlyIntentions, viewingMonth, setIntentionForMonth, getIntentionForMonth, goToMonth, setViewingMonthDirect, currentMonthIntention, setMonthlyIntention, monthlyStreak,
       saveReflection,
       isOnboarded, markOnboarded,
       clearAllData,

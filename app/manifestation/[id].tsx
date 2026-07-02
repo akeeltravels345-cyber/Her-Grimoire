@@ -1,416 +1,777 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, ScrollView, Pressable, StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { theme } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
-import { useAlert } from '@/template';
-import { SignType } from '../../services/mockData';
-import GradientScreen from '../../components/GradientScreen';
-import { resolveCategoryColor, resolveCategory } from '../../utils/categoryHelpers';
+import StarField from '../../components/StarField';
+import ProgressBar from '../../components/ProgressBar';
+import ImageDisplay from '../../components/ImageDisplay';
+import SpilledExplanationModal from '../../components/SpilledExplanationModal';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { DetailPageSkeleton } from '../../components/LoadingSkeleton';
+import { formatFullDateWithDay } from '../../utils/dateHelpers';
+import { resolveCategoryColor } from '../../utils/categoryHelpers';
 
-const SIGN_CONFIG: Record<SignType, { emoji: string; label: string; color: string }> = {
-  dream:         { emoji: '🌙', label: 'Dream',            color: '#6667AB' },
-  omen:          { emoji: '🦅', label: 'Omen',             color: '#C9A0DC' },
-  encounter:     { emoji: '👁️',  label: 'Encounter',        color: '#4EA8DE' },
-  symbol:        { emoji: '✦',  label: 'Symbol',           color: '#F5D5E0' },
-  number:        { emoji: '🔢', label: 'Repeated Number',  color: '#B8B0E8' },
-  synchronicity: { emoji: '✨', label: 'Synchronicity',    color: '#7ED4A8' },
+const SIGN_TYPE_LABELS: Record<string, string> = {
+  dream: '🌙 Dream',
+  omen: '🦅 Omen',
+  encounter: '👁️ Encounter',
+  symbol: '◆ Symbol',
+  number: '🔢 Repeated Number',
+  synchronicity: '✨ Synchronicity',
 };
 
-const STAGES = ['brewing', 'stirring', 'spilled'] as const;
-const STAGE_CONFIG = {
-  brewing:  { label: 'Brewing',  emoji: '🪄', color: '#C9A0DC' },
-  stirring: { label: 'Stirring', emoji: '🌊', color: '#4EA8DE' },
-  spilled:  { label: 'Spilled',  emoji: '⭐', color: '#7ED4A8' },
+const STATUS_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  brewing: { label: 'Brewing', emoji: '🫖', color: '#8878A8' },
+  stirring: { label: 'Stirring', emoji: '🌀', color: '#F5A962' },
+  spilled: { label: 'Manifested', emoji: '✨', color: '#7ED4A8' },
 };
 
 export default function ManifestationDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { manifestations, categories, categoryColors, deleteManifestationResult } = useApp();
-  const { showAlert } = useAlert();
+  const { manifestations, rituals, categories, categoryColors, deleteManifestationResult } =
+    useApp();
 
-  const manif = manifestations.find(m => m.id === id);
+  const manifestation = manifestations.find(
+    (m) => m.id === id || m.ritualId === id || m.id === 'mf_series_' + id || m.id === 'mf_group_' + id
+  );
 
-  if (!manif) {
+  const ritual = manifestation
+    ? rituals.find((r) => r.id === manifestation.ritualId)
+    : null;
+
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showSpilledExplanation, setShowSpilledExplanation] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (!manifestation) {
     return (
-      <GradientScreen>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: theme.textSecondary, fontSize: 16 }}>Manifestation not found</Text>
-          <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
-            <Text style={{ color: theme.primary, fontWeight: '600' }}>Go back</Text>
-          </Pressable>
-        </View>
-      </GradientScreen>
+      <View style={{ flex: 1, backgroundColor: theme.background }}>
+        <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+          <StarField starCount={40} showShootingStar={false} />
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Manifestation not found</Text>
+            <Pressable onPress={() => router.back()} style={styles.backLink}>
+              <Text style={styles.backLinkText}>Go back</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
-  const stage = STAGE_CONFIG[manif.status];
-  const stageIndex = STAGES.indexOf(manif.status);
-  const catObj = resolveCategory(manif.category, categories);
-  const catColor = resolveCategoryColor(manif.category, categoryColors, categories);
-
-  const sortedResults = [...manif.results].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  const lastSign = sortedResults.filter(r => r.type === 'sign').at(-1);
-  const spillResult = sortedResults.find(r => r.type === 'manifested');
-  const daysActive = Math.ceil(
-    (new Date().getTime() - new Date(manif.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-  );
-
-  const handleDeleteResult = (resultId: string, label: string) => {
-    showAlert(
-      'Remove this entry?',
-      `Remove "${label}" from your signs log? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            deleteManifestationResult(manif.id, resultId);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          },
-        },
-      ]
-    );
+  // Calculate progress: total results as an indicator of progress towards manifestation
+  // Brewing = 0%, Stirring = 50%, Spilled = 100%
+  const getProgressFromStatus = () => {
+    if (manifestation.status === 'spilled') return 1;
+    if (manifestation.status === 'stirring') return 0.5 + (manifestation.results.length * 0.01);
+    return Math.min(0.4, manifestation.results.length * 0.05);
   };
 
+  const progress = getProgressFromStatus();
+  const statusInfo = STATUS_LABELS[manifestation.status];
+
+  const handleDeleteResult = (resultId: string) => {
+    Haptics.selectionAsync();
+    setSelectedResultId(resultId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteResult = async () => {
+    if (!selectedResultId) return;
+    setIsLoading(true);
+    try {
+      deleteManifestationResult(manifestation.id, selectedResultId);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowDeleteModal(false);
+      setSelectedResultId(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const categoryColorList = manifestation.categories.map(
+    (cat) => resolveCategoryColor(cat, categoryColors, categories, theme.primary)
+  );
+
   return (
-    <GradientScreen>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.headerBtn}>
-          <MaterialIcons name="arrow-back" size={24} color={theme.textPrimary} />
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerEyebrow}>✦ The Cauldron</Text>
-          <Text style={styles.headerRitualName} numberOfLines={1}>{manif.ritualName}</Text>
-        </View>
-        <Pressable
-          style={styles.headerBtn}
-          onPress={() => router.push(`/ritual/${manif.ritualId}`)}
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+        <StarField starCount={40} showShootingStar={false} />
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 16,
+            paddingBottom: insets.bottom + 32,
+          }}
+          showsVerticalScrollIndicator={false}
         >
-          <MaterialIcons name="open-in-new" size={20} color={theme.textSecondary} />
-        </Pressable>
-      </View>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 110 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Category + cast date */}
-        <View style={styles.metaRow}>
-          <View style={[styles.catPill, { backgroundColor: catColor + '20' }]}>
-            <MaterialIcons
-              name={(catObj?.icon || 'auto-awesome') as keyof typeof MaterialIcons.glyphMap}
-              size={12}
-              color={catColor}
-            />
-            <Text style={[styles.catPillText, { color: catColor }]}>
-              {catObj?.name || manif.category}
-            </Text>
+          {/* Header */}
+          <View style={styles.headerContainer}>
+            <Pressable onPress={() => router.back()} style={styles.backButton}>
+              <MaterialIcons name="arrow-back" size={24} color={theme.textPrimary} />
+            </Pressable>
+            <Text style={styles.pageTitle} numberOfLines={1}>Manifestation</Text>
+            <View style={{ width: 40 }} />
           </View>
-          <Text style={styles.castDate}>
-            Cast {new Date(manif.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </Text>
-        </View>
 
-        {/* Intention */}
-        <View style={[styles.intentionBlock, { borderLeftColor: stage.color }]}>
-          <Text style={[styles.intentionLabel, { color: stage.color }]}>INTENTION</Text>
-          <Text style={styles.intentionText}>"{manif.intention}"</Text>
-        </View>
+          {/* Status badge */}
+          <View style={[styles.statusBadgeContainer, { backgroundColor: statusInfo.color + '20' }]}>
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusEmoji}>{statusInfo.emoji}</Text>
+              <Text style={[styles.statusLabel, { color: statusInfo.color }]}>
+                {statusInfo.label}
+              </Text>
+            </View>
+            {manifestation.status === 'spilled' && (
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setShowSpilledExplanation(true);
+                }}
+                style={styles.infoButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MaterialIcons name="info" size={18} color={statusInfo.color} />
+              </Pressable>
+            )}
+          </View>
 
-        {/* Stage progress track */}
-        <View style={styles.progressTrack}>
-          {STAGES.map((s, i) => {
-            const cfg = STAGE_CONFIG[s];
-            const isActive = i <= stageIndex;
-            const isCurrent = s === manif.status;
-            return (
-              <React.Fragment key={s}>
-                <View style={styles.progressStep}>
-                  <View style={[
-                    styles.progressDot,
-                    { backgroundColor: isActive ? cfg.color : theme.surfaceLight, borderColor: isActive ? cfg.color : theme.border },
-                  ]}>
-                    {isCurrent && <View style={[styles.progressDotInner, { backgroundColor: cfg.color }]} />}
-                    {i < stageIndex && (
-                      <MaterialIcons name="check" size={10} color={theme.background} />
-                    )}
-                  </View>
-                  <Text style={[styles.progressLabel, { color: isActive ? cfg.color : theme.textMuted }]}>
-                    {cfg.emoji} {cfg.label}
+          {/* Intention card */}
+          <View style={styles.intentionCard}>
+            <Text style={styles.cardLabel}>INTENTION</Text>
+            <Text style={styles.intentionText}>&ldquo;{manifestation.intention}&rdquo;</Text>
+            {ritual && (
+              <Text style={styles.ritualName}>— {ritual.name}</Text>
+            )}
+          </View>
+
+          {/* Spilled manifestation contextual help */}
+          {manifestation.status === 'spilled' && (
+            <View style={styles.spilledHelpSection}>
+              <View style={styles.spilledHelpContent}>
+                <Text style={styles.spilledHelpEmoji}>✨</Text>
+                <View style={styles.spilledHelpText}>
+                  <Text style={styles.spilledHelpTitle}>Your intention has manifested!</Text>
+                  <Text style={styles.spilledHelpDescription}>
+                    The universe has delivered your desired outcome. Celebrate this magical moment and acknowledge the power of your intention-setting.
                   </Text>
                 </View>
-                {i < STAGES.length - 1 && (
-                  <View style={[styles.progressLine, { backgroundColor: i < stageIndex ? stage.color + '60' : theme.border }]} />
-                )}
-              </React.Fragment>
-            );
-          })}
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: stage.color }]}>
-              {manif.results.filter(r => r.type === 'sign').length}
-            </Text>
-            <Text style={styles.statLabel}>Signs</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: stage.color }]}>{daysActive}</Text>
-            <Text style={styles.statLabel}>Days Active</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: stage.color }]}>
-              {spillResult
-                ? new Date(spillResult.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                : lastSign
-                ? new Date(lastSign.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                : '—'}
-            </Text>
-            <Text style={styles.statLabel}>{spillResult ? 'Spilled' : 'Last Sign'}</Text>
-          </View>
-        </View>
-
-        {/* Spilled celebration */}
-        {manif.status === 'spilled' && spillResult && (
-          <View style={styles.spilledBanner}>
-            <Text style={styles.spilledBannerEmoji}>⭐</Text>
-            <Text style={styles.spilledBannerTitle}>Spilled into Reality</Text>
-            <Text style={styles.spilledBannerDate}>
-              {new Date(spillResult.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            </Text>
-            <Text style={styles.spilledBannerNote}>{spillResult.note}</Text>
-          </View>
-        )}
-
-        {/* Timeline */}
-        <View style={styles.timelineSection}>
-          <Text style={styles.timelineTitle}>
-            SIGNS & SYNCHRONICITIES
-            {sortedResults.length > 0 && <Text style={styles.timelineCount}> · {sortedResults.filter(r => r.type === 'sign').length}</Text>}
-          </Text>
-
-          {sortedResults.filter(r => r.type === 'sign').length === 0 ? (
-            <View style={styles.emptyTimeline}>
-              <Text style={styles.emptyEmoji}>🌱</Text>
-              <Text style={styles.emptyTitle}>No signs logged yet</Text>
-              <Text style={styles.emptyText}>
-                Stay aware — signs show up in dreams, patterns, and unexpected encounters.
-              </Text>
-              {manif.status !== 'spilled' && (
-                <Pressable
-                  style={styles.emptyLogBtn}
-                  onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: manif.ritualId } })}
-                >
-                  <Text style={styles.emptyLogBtnText}>✦ Log Your First Sign</Text>
-                </Pressable>
-              )}
-            </View>
-          ) : (
-            <View style={styles.timeline}>
-              {sortedResults.filter(r => r.type === 'sign').map((r, index, arr) => {
-                const signCfg = r.signType ? SIGN_CONFIG[r.signType] : null;
-                const entryColor = signCfg?.color ?? '#4EA8DE';
-                const isLast = index === arr.length - 1;
-
-                return (
-                  <View key={r.id} style={styles.timelineItem}>
-                    {!isLast && <View style={[styles.timelineConnector, { backgroundColor: entryColor + '35' }]} />}
-                    <View style={[styles.timelineDot, { backgroundColor: entryColor, borderColor: entryColor + '40' }]} />
-                    <View style={[styles.timelineCard, { borderLeftColor: entryColor }]}>
-                      <View style={styles.timelineCardHeader}>
-                        <View style={[styles.signTypePill, { backgroundColor: entryColor + '15' }]}>
-                          <Text style={styles.signEmoji}>{signCfg?.emoji ?? '✦'}</Text>
-                          <Text style={[styles.signLabel, { color: entryColor }]}>
-                            {signCfg?.label ?? 'Sign'}
-                          </Text>
-                        </View>
-                        <Text style={styles.timelineDate}>
-                          {new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </Text>
-                        <Pressable
-                          style={styles.deleteBtn}
-                          onPress={() => handleDeleteResult(r.id, signCfg?.label ?? 'Sign')}
-                          hitSlop={8}
-                        >
-                          <MaterialIcons name="delete-outline" size={16} color={theme.textMuted} />
-                        </Pressable>
-                      </View>
-                      <Text style={styles.timelineNote}>{r.note}</Text>
-                    </View>
-                  </View>
-                );
-              })}
+              </View>
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setShowSpilledExplanation(true);
+                }}
+                style={styles.spilledHelpLink}
+              >
+                <Text style={styles.spilledHelpLinkText}>Learn more</Text>
+                <MaterialIcons name="chevron-right" size={16} color={theme.primary} />
+              </Pressable>
             </View>
           )}
-        </View>
-      </ScrollView>
 
-      {/* Floating action bar */}
-      {manif.status !== 'spilled' && (
-        <View style={[styles.floatingBar, { paddingBottom: insets.bottom + 16 }]}>
-          <Pressable
-            style={styles.logSignBtn}
-            onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: manif.ritualId } })}
-          >
-            <Text style={styles.logSignBtnText}>✦ Log a Sign</Text>
-          </Pressable>
-          <Pressable
-            style={styles.spillBtn}
-            onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: manif.ritualId, mode: 'spill' } })}
-          >
-            <Text style={styles.spillBtnText}>⭐ It Spilled</Text>
-          </Pressable>
+          {/* Categories */}
+          {manifestation.categories.length > 0 && (
+            <View style={styles.categoriesContainer}>
+              <Text style={styles.sectionLabel}>CATEGORIES</Text>
+              <View style={styles.categoryBadges}>
+                {manifestation.categories.map((cat, idx) => (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.categoryBadge,
+                      { backgroundColor: categoryColorList[idx] + '30' },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryBadgeText,
+                        { color: categoryColorList[idx] },
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Progress indicator */}
+          <View style={styles.progressSection}>
+            <Text style={styles.sectionLabel}>MANIFESTATION PROGRESS</Text>
+            <ProgressBar
+              progress={progress}
+              label="Journey to Manifestation"
+              showPercentage={true}
+              height={14}
+              fillColor={statusInfo.color}
+              animated={true}
+            />
+            <View style={styles.progressExplainer}>
+              <MaterialIcons
+                name="info"
+                size={16}
+                color={theme.textMuted}
+              />
+              <Text style={styles.progressExplainerText}>
+                Track signs and record when your intention manifests
+              </Text>
+            </View>
+          </View>
+
+          {/* Results/Signs */}
+          <View style={styles.resultsSection}>
+            <View style={styles.resultsSectionHeader}>
+              <Text style={styles.sectionLabel}>SIGNS & RESULTS</Text>
+              <Text style={styles.resultCount}>
+                {manifestation.results.length}
+              </Text>
+            </View>
+
+            {manifestation.results.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateEmoji}>🔮</Text>
+                <Text style={styles.emptyStateText}>No signs logged yet</Text>
+                <Text style={styles.emptyStateSubtext}>
+                  Log signs and manifestation results to track your intention&rsquo;s journey
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.resultsList}>
+                {manifestation.results.map((result, idx) => (
+                  <View key={result.id} style={styles.resultCard}>
+                    <View style={styles.resultHeader}>
+                      <View style={styles.resultTypeContainer}>
+                        <Text style={styles.resultTypeEmoji}>
+                          {result.type === 'manifested'
+                            ? '✨'
+                            : SIGN_TYPE_LABELS[result.signType || 'symbol']?.charAt(0) || '🌙'}
+                        </Text>
+                        <View style={styles.resultMetadata}>
+                          <Text style={styles.resultType}>
+                            {result.type === 'manifested'
+                              ? 'Manifestation'
+                              : SIGN_TYPE_LABELS[result.signType || 'symbol']}
+                          </Text>
+                          <Text style={styles.resultDate}>
+                            {formatFullDateWithDay(result.date)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Pressable
+                        onPress={() => handleDeleteResult(result.id)}
+                        style={styles.deleteButton}
+                      >
+                        <MaterialIcons
+                          name="delete-outline"
+                          size={20}
+                          color={theme.error}
+                        />
+                      </Pressable>
+                    </View>
+
+                    {/* Result note */}
+                    <Text style={styles.resultNote}>{result.note}</Text>
+
+                    {/* Result image */}
+                    {result.imageUrl && (
+                      <View style={styles.resultImageContainer}>
+                        <ImageDisplay imageUri={result.imageUrl} size={200} />
+                      </View>
+                    )}
+
+                    {idx < manifestation.results.length - 1 && (
+                      <View style={styles.divider} />
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* Action buttons */}
+          <View style={styles.actionsContainer}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionButton,
+                styles.primaryButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={() => {
+                Haptics.selectionAsync();
+                router.push({
+                  pathname: '/add-manifestation',
+                  params: { ritualId: manifestation.ritualId },
+                });
+              }}
+            >
+              <MaterialIcons name="add" size={20} color={theme.background} />
+              <Text style={styles.primaryButtonText}>Log Sign or Manifestation</Text>
+            </Pressable>
+
+            {manifestation.status !== 'spilled' && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  styles.secondaryButton,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  router.push({
+                    pathname: '/add-manifestation',
+                    params: { ritualId: manifestation.ritualId, mode: 'spill' },
+                  });
+                }}
+              >
+                <MaterialIcons name="star" size={20} color={theme.primary} />
+                <Text style={styles.secondaryButtonText}>Mark as Manifested</Text>
+              </Pressable>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+
+      {/* Spilled explanation modal */}
+      <SpilledExplanationModal
+        visible={showSpilledExplanation}
+        onClose={() => setShowSpilledExplanation(false)}
+      />
+
+      {/* Delete confirmation modal */}
+      <Modal visible={showDeleteModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Delete this record?</Text>
+            <Text style={styles.modalMessage}>
+              This action cannot be undone.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modalButton,
+                  styles.modalButtonSecondary,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={isLoading}
+              >
+                <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modalButton,
+                  styles.modalButtonDanger,
+                  pressed && styles.buttonPressed,
+                  isLoading && styles.buttonDisabled,
+                ]}
+                onPress={confirmDeleteResult}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color={theme.background} />
+                ) : (
+                  <Text style={styles.modalButtonDangerText}>Delete</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         </View>
+      </Modal>
+
+      {/* Loading overlay */}
+      {isSaving && (
+        <Modal transparent={true} visible={isSaving} animationType="none">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: theme.backgroundSecondary, borderRadius: theme.radius.lg, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+              <LoadingSpinner size={52} color={theme.primary} />
+              <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '600', color: theme.textPrimary }}>Saving...</Text>
+            </View>
+          </View>
+        </Modal>
       )}
-    </GradientScreen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 4, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: theme.border,
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
   },
-  headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerCenter: { flex: 1, alignItems: 'center' },
-  headerEyebrow: { fontSize: 10, fontWeight: '700', color: theme.primary, letterSpacing: 1.5, textTransform: 'uppercase' },
-  headerRitualName: { fontSize: 15, fontWeight: '600', color: theme.textPrimary, marginTop: 1 },
-
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 14 },
-  catPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10,
-  },
-  catPillText: { fontSize: 11, fontWeight: '600' },
-  castDate: { fontSize: 12, color: theme.textMuted },
-
-  intentionBlock: {
-    borderLeftWidth: 3, borderRadius: 10,
-    backgroundColor: theme.surface, padding: 14, marginBottom: 20,
-  },
-  intentionLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
-  intentionText: {
-    fontSize: 15, color: theme.textPrimary, lineHeight: 22,
-    fontStyle: 'italic', fontFamily: theme.fonts.serif,
-  },
-
-  progressTrack: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: theme.surface, borderRadius: 14, padding: 16,
+  errorText: {
+    ...theme.typography.body,
+    color: theme.textSecondary,
     marginBottom: 16,
   },
-  progressStep: { alignItems: 'center', gap: 6 },
-  progressDot: {
-    width: 24, height: 24, borderRadius: 12, borderWidth: 2,
-    alignItems: 'center', justifyContent: 'center',
+  backLink: {
+    marginTop: 16,
   },
-  progressDotInner: { width: 8, height: 8, borderRadius: 4 },
-  progressLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
-  progressLine: { flex: 1, height: 2, marginBottom: 16, marginHorizontal: 4 },
-
-  statsRow: {
-    flexDirection: 'row', backgroundColor: theme.surface,
-    borderRadius: 14, padding: 16, marginBottom: 20,
+  backLinkText: {
+    ...theme.typography.button,
+    color: theme.primary,
   },
-  statItem: { flex: 1, alignItems: 'center', gap: 4 },
-  statValue: { fontSize: 18, fontWeight: '700' },
-  statLabel: { fontSize: 9, fontWeight: '600', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  statDivider: { width: 1, backgroundColor: theme.border, marginVertical: 4 },
-
-  spilledBanner: {
-    alignItems: 'center', padding: 24, gap: 6,
-    backgroundColor: '#7ED4A810', borderRadius: 16,
-    borderWidth: 1, borderColor: '#7ED4A840', marginBottom: 24,
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
   },
-  spilledBannerEmoji: { fontSize: 40, marginBottom: 4 },
-  spilledBannerTitle: { fontSize: 18, fontWeight: '700', color: '#7ED4A8' },
-  spilledBannerDate: { fontSize: 13, color: '#7ED4A8', fontWeight: '500', opacity: 0.8 },
-  spilledBannerNote: {
-    fontSize: 13, color: theme.textSecondary, textAlign: 'center',
-    lineHeight: 20, fontFamily: theme.fonts.serif, paddingHorizontal: 16, marginTop: 6,
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.surface,
   },
-
-  timelineSection: { marginTop: 4 },
-  timelineTitle: { fontSize: 10, fontWeight: '700', color: theme.textMuted, letterSpacing: 1.2, marginBottom: 16 },
-  timelineCount: { color: theme.textMuted, fontWeight: '400' },
-
-  emptyTimeline: { alignItems: 'center', paddingVertical: 32, gap: 8 },
-  emptyEmoji: { fontSize: 36 },
-  emptyTitle: { fontSize: 15, fontWeight: '600', color: theme.textSecondary },
-  emptyText: {
-    fontSize: 13, color: theme.textMuted, textAlign: 'center',
-    lineHeight: 20, paddingHorizontal: 20, fontFamily: theme.fonts.serif,
+  pageTitle: {
+    ...theme.typography.pageTitle,
+    color: theme.textPrimary,
+    flex: 1,
+    textAlign: 'center',
   },
-  emptyLogBtn: {
-    marginTop: 8, paddingHorizontal: 24, paddingVertical: 12,
-    borderRadius: 20, borderWidth: 1.5, borderColor: theme.primary,
-    backgroundColor: theme.primary + '12',
+  statusBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: theme.radius.md,
+    marginBottom: 20,
+    alignSelf: 'flex-start',
   },
-  emptyLogBtnText: { fontSize: 13, fontWeight: '700', color: theme.primary },
-
-  timeline: { gap: 0 },
-  timelineItem: { flexDirection: 'row', gap: 12, marginBottom: 4 },
-  timelineDot: {
-    width: 10, height: 10, borderRadius: 5, borderWidth: 2,
-    marginTop: 16, flexShrink: 0,
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  timelineConnector: {
-    position: 'absolute', left: 16, top: 26, bottom: -4, width: 2,
+  infoButton: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.radius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
-  timelineCard: {
-    flex: 1, backgroundColor: theme.surface, borderRadius: 12,
-    borderLeftWidth: 3, padding: 12, marginBottom: 12,
+  statusEmoji: {
+    fontSize: 18,
   },
-  timelineCardHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8,
+  statusLabel: {
+    ...theme.typography.badge,
+    fontWeight: '700',
   },
-  signTypePill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
+  intentionCard: {
+    backgroundColor: theme.surface,
+    borderRadius: theme.radius.lg,
+    padding: 16,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: theme.primary,
+    ...theme.shadows.card,
   },
-  signEmoji: { fontSize: 12 },
-  signLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
-  timelineDate: { fontSize: 11, color: theme.textMuted, flex: 1 },
-  deleteBtn: { padding: 2 },
-  timelineNote: {
-    fontSize: 13, color: theme.textPrimary, lineHeight: 20,
-    fontFamily: theme.fonts.serif,
+  cardLabel: {
+    ...theme.typography.sectionLabel,
+    color: theme.textMuted,
+    marginBottom: 8,
   },
-
-  floatingBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    flexDirection: 'row', gap: 10,
-    paddingHorizontal: 16, paddingTop: 12,
-    backgroundColor: theme.background,
-    borderTopWidth: 1, borderTopColor: theme.border,
+  intentionText: {
+    ...theme.typography.body,
+    color: theme.textPrimary,
+    fontStyle: 'italic',
+    marginBottom: 8,
   },
-  logSignBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 14,
-    borderWidth: 1.5, borderColor: theme.border,
-    alignItems: 'center', backgroundColor: theme.surface,
+  ritualName: {
+    ...theme.typography.bodySmall,
+    color: theme.textSecondary,
   },
-  logSignBtnText: { fontSize: 14, fontWeight: '700', color: theme.textPrimary },
-  spillBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center',
-    backgroundColor: '#7ED4A820', borderWidth: 1.5, borderColor: '#7ED4A8',
+  spilledHelpSection: {
+    marginBottom: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: theme.primary + '15',
+    borderRadius: theme.radius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: theme.primary,
   },
-  spillBtnText: { fontSize: 14, fontWeight: '700', color: '#7ED4A8' },
+  spilledHelpContent: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  spilledHelpEmoji: {
+    fontSize: 28,
+    marginTop: 2,
+  },
+  spilledHelpText: {
+    flex: 1,
+    gap: 4,
+  },
+  spilledHelpTitle: {
+    ...theme.typography.cardTitle,
+    color: theme.textPrimary,
+  },
+  spilledHelpDescription: {
+    ...theme.typography.bodySmall,
+    color: theme.textSecondary,
+    lineHeight: 18,
+  },
+  spilledHelpLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+  },
+  spilledHelpLinkText: {
+    ...theme.typography.button,
+    color: theme.primary,
+    fontWeight: '600',
+  },
+  categoriesContainer: {
+    marginBottom: 24,
+  },
+  sectionLabel: {
+    ...theme.typography.sectionLabel,
+    color: theme.textMuted,
+    marginBottom: 12,
+  },
+  categoryBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  categoryBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: theme.radius.full,
+  },
+  categoryBadgeText: {
+    ...theme.typography.badge,
+    fontWeight: '600',
+  },
+  progressSection: {
+    marginBottom: 32,
+  },
+  progressExplainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: theme.surfaceLight,
+    borderRadius: theme.radius.md,
+  },
+  progressExplainerText: {
+    ...theme.typography.bodySmall,
+    color: theme.textMuted,
+    flex: 1,
+    marginTop: 2,
+  },
+  resultsSection: {
+    marginBottom: 24,
+  },
+  resultsSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resultCount: {
+    ...theme.typography.badge,
+    color: theme.primary,
+    backgroundColor: theme.surface,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.sm,
+    overflow: 'hidden',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    backgroundColor: theme.surfaceLight,
+    borderRadius: theme.radius.lg,
+  },
+  emptyStateEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyStateText: {
+    ...theme.typography.cardTitle,
+    color: theme.textSecondary,
+    marginBottom: 8,
+  },
+  emptyStateSubtext: {
+    ...theme.typography.bodySmall,
+    color: theme.textMuted,
+    textAlign: 'center',
+  },
+  resultsList: {
+    gap: 16,
+  },
+  resultCard: {
+    backgroundColor: theme.surface,
+    borderRadius: theme.radius.lg,
+    padding: 16,
+    ...theme.shadows.card,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  resultTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  resultTypeEmoji: {
+    fontSize: 24,
+  },
+  resultMetadata: {
+    flex: 1,
+    gap: 2,
+  },
+  resultType: {
+    ...theme.typography.cardTitle,
+    color: theme.textPrimary,
+  },
+  resultDate: {
+    ...theme.typography.bodySmall,
+    color: theme.textMuted,
+  },
+  deleteButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resultNote: {
+    ...theme.typography.body,
+    color: theme.textPrimary,
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  resultImageContainer: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: theme.border,
+    marginTop: 16,
+  },
+  actionsContainer: {
+    gap: 12,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: theme.radius.lg,
+    ...theme.shadows.card,
+  },
+  primaryButton: {
+    backgroundColor: theme.primary,
+  },
+  primaryButtonText: {
+    ...theme.typography.button,
+    color: theme.background,
+    fontWeight: '700',
+  },
+  secondaryButton: {
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.primary,
+  },
+  secondaryButtonText: {
+    ...theme.typography.button,
+    color: theme.primary,
+    fontWeight: '700',
+  },
+  buttonPressed: {
+    opacity: 0.8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalContent: {
+    backgroundColor: theme.backgroundSecondary,
+    borderRadius: theme.radius.lg,
+    padding: 24,
+    width: '100%',
+    ...theme.shadows.elevated,
+  },
+  modalTitle: {
+    ...theme.typography.cardTitle,
+    color: theme.textPrimary,
+    marginBottom: 8,
+  },
+  modalMessage: {
+    ...theme.typography.body,
+    color: theme.textSecondary,
+    marginBottom: 24,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: theme.radius.md,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalButtonSecondary: {
+    backgroundColor: theme.surface,
+  },
+  modalButtonSecondaryText: {
+    ...theme.typography.button,
+    color: theme.textPrimary,
+  },
+  modalButtonDanger: {
+    backgroundColor: theme.error,
+  },
+  modalButtonDangerText: {
+    ...theme.typography.button,
+    color: theme.textPrimary,
+    fontWeight: '700',
+  },
 });

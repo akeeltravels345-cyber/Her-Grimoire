@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform,
@@ -12,6 +12,9 @@ import { useApp } from '../contexts/AppContext';
 import { resolveCategoryColor, resolveCategory } from '../utils/categoryHelpers';
 import { useAlert } from '@/template';
 import GradientScreen from '../components/GradientScreen';
+import ImageDisplay from '../components/ImageDisplay';
+import SimpleCalendarPicker from '../components/SimpleCalendarPicker';
+import { formatDateWithLongDay } from '../utils/dateHelpers';
 
 const scheduleOptions = [
   { id: 'daily',      label: 'Daily',      icon: 'today' },
@@ -76,7 +79,11 @@ export default function AddToPracticeScreen() {
   const [schedule, setSchedule] = useState<'daily' | 'weekly' | 'monthly' | 'moon_phase' | 'as_needed'>(
     libRitual?.schedule || 'as_needed'
   );
-  const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
+  const [scheduledDate, setScheduledDate] = useState<Date | null>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  });
   const [consecutiveDays, setConsecutiveDays] = useState(1);
   const [moonPhaseSelection, setMoonPhaseSelection] = useState<number | null>(
     libRitual?.schedule === 'moon_phase' && libRitual?.scheduleDetail != null
@@ -84,18 +91,19 @@ export default function AddToPracticeScreen() {
       : null
   );
   const [tangibleOutcome, setTangibleOutcome] = useState(libRitual?.tangibleOutcome || '');
-  const dateScrollRef = useRef<any>(null);
-  const DATE_TODAY_INDEX = 30;
 
+  const todayDateString = useMemo(() => new Date().toDateString(), []);
+
+  // Determine if moon phase schedule is selected (must be before useEffect)
+  const isMoonPhase = schedule === 'moon_phase';
+
+  // Initialize moon phase date if applicable
   useEffect(() => {
-    if (dateScrollRef.current) {
-      setTimeout(() => {
-        dateScrollRef.current?.scrollTo({ x: DATE_TODAY_INDEX * 72, animated: false });
-      }, 100);
+    if (isMoonPhase && moonPhaseSelection !== null && !scheduledDate) {
+      setScheduledDate(getNextMoonPhaseDate(moonPhaseSelection));
     }
   }, []);
 
-  const isMoonPhase = schedule === 'moon_phase';
   const canSave =
     scheduledDate !== null &&
     (!isMoonPhase || moonPhaseSelection !== null);
@@ -127,8 +135,11 @@ export default function AddToPracticeScreen() {
     );
   }
 
-  const catObj = resolveCategory(libRitual.category, categories);
-  const catColor = resolveCategoryColor(libRitual.category, categoryColors, categories);
+  // Handle both legacy (category) and new (categories) formats
+  const categoryIds = libRitual.categories && libRitual.categories.length > 0 ? libRitual.categories : (libRitual.category ? [libRitual.category] : []);
+  const primaryCategoryId = categoryIds[0];
+  const catObj = resolveCategory(primaryCategoryId, categories);
+  const catColor = resolveCategoryColor(primaryCategoryId, categoryColors, categories);
 
   return (
     <GradientScreen>
@@ -168,6 +179,11 @@ export default function AddToPracticeScreen() {
             </View>
             {libRitual.intention ? (
               <Text style={styles.ritualIntention} numberOfLines={2}>"{libRitual.intention}"</Text>
+            ) : null}
+            {libRitual.imageUrl ? (
+              <View style={styles.ritualImageContainer}>
+                <ImageDisplay imageUri={libRitual.imageUrl} size={100} />
+              </View>
             ) : null}
           </View>
 
@@ -232,7 +248,7 @@ export default function AddToPracticeScreen() {
           </View>
           {consecutiveDays > 1 && (
             <Text style={styles.hint}>
-              ✦ Creates {consecutiveDays} entries starting from your chosen date
+              Creates {consecutiveDays} entries starting from your chosen date
             </Text>
           )}
 
@@ -266,49 +282,40 @@ export default function AddToPracticeScreen() {
               </View>
               {scheduledDate && moonPhaseSelection !== null && (
                 <Text style={[styles.hint, { color: theme.primary }]}>
-                  ✦ Next {MOON_PHASES[moonPhaseSelection].name}: {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  Next {MOON_PHASES[moonPhaseSelection].name}: {formatDateWithLongDay(scheduledDate)}
                 </Text>
               )}
             </>
           )}
 
-          {/* Date strip — hidden for moon_phase */}
+          {/* Calendar picker — hidden for moon_phase */}
           {!isMoonPhase && (
             <>
               <Text style={styles.label}>Start Date *</Text>
-              <ScrollView
-                ref={dateScrollRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.dateStrip}
-              >
-                {DATE_OPTIONS.map((d, i) => {
-                  const isSelected = scheduledDate?.toDateString() === d.toDateString();
-                  const isToday = d.toDateString() === new Date().toDateString();
-                  return (
-                    <Pressable
-                      key={i}
-                      style={[styles.datePill, isSelected && styles.datePillActive]}
-                      onPress={() => { setScheduledDate(d); Haptics.selectionAsync(); }}
-                    >
-                      <Text style={[styles.datePillDay, isSelected && styles.datePillTextActive]}>
-                        {isToday ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </Text>
-                      <Text style={[styles.datePillNum, isSelected && styles.datePillTextActive]}>
-                        {d.getDate()}
-                      </Text>
-                      <Text style={[styles.datePillMonth, isSelected && styles.datePillTextActive]}>
-                        {d.toLocaleDateString('en-US', { month: 'short' })}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+              {scheduledDate && (
+                <SimpleCalendarPicker
+                  selectedDate={scheduledDate}
+                  onSelectDate={(d) => {
+                    setScheduledDate(d);
+                    Haptics.selectionAsync();
+                  }}
+                  minDate={(() => {
+                    const min = new Date();
+                    min.setDate(min.getDate() - 30);
+                    return min;
+                  })()}
+                  maxDate={(() => {
+                    const max = new Date();
+                    max.setDate(max.getDate() + 60);
+                    return max;
+                  })()}
+                />
+              )}
               {!scheduledDate ? (
-                <Text style={styles.hint}>Swipe to pick a start date</Text>
+                <Text style={styles.hint}>Pick a start date</Text>
               ) : (
                 <Text style={[styles.hint, { color: theme.primary }]}>
-                  Scheduled for {scheduledDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  Scheduled for {formatDateWithLongDay(scheduledDate)}
                 </Text>
               )}
             </>
@@ -334,6 +341,7 @@ const styles = StyleSheet.create({
   categoryBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
   categoryBadgeText: { fontSize: 11, fontWeight: '600' },
   ritualIntention: { fontSize: 13, color: theme.textSecondary, marginTop: 10, lineHeight: 18, fontStyle: 'italic' },
+  ritualImageContainer: { alignItems: 'center', marginTop: 14 },
 
   label: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginTop: 24, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   input: { backgroundColor: theme.surface, borderRadius: theme.radius.md, padding: 14, fontSize: 15, color: theme.textPrimary, borderWidth: 1, borderColor: theme.border },
@@ -358,12 +366,4 @@ const styles = StyleSheet.create({
   moonPhaseName: { fontSize: 13, fontWeight: '700', color: theme.textPrimary, textAlign: 'center' },
   moonPhaseNameActive: { color: theme.primary },
   moonPhaseEnergy: { fontSize: 10, color: theme.textMuted, textAlign: 'center', fontStyle: 'italic' },
-
-  dateStrip: { paddingVertical: 4, paddingRight: 16, gap: 8 },
-  datePill: { alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border, minWidth: 58 },
-  datePillActive: { backgroundColor: theme.primary, borderColor: theme.primary },
-  datePillDay: { fontSize: 11, fontWeight: '600', color: theme.textMuted, marginBottom: 2 },
-  datePillNum: { fontSize: 20, fontWeight: '700', color: theme.textPrimary },
-  datePillMonth: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
-  datePillTextActive: { color: theme.background },
 });

@@ -1,11 +1,19 @@
 export type SignType = 'dream' | 'omen' | 'encounter' | 'symbol' | 'number' | 'synchronicity';
 
+export interface Deity {
+  id: string;
+  name: string;
+  icon: string;
+  description?: string;
+}
+
 export interface ManifestationResult {
   id: string;
   note: string;
   date: string;
   type: 'sign' | 'manifested';
   signType?: SignType;
+  imageUrl?: string; // Image of the manifestation sign
 }
 
 export interface ManifestationRecord {
@@ -13,7 +21,9 @@ export interface ManifestationRecord {
   ritualId: string;
   ritualName: string;
   intention: string;
-  category: string;
+  categories: string[];
+  category?: string; // Legacy support - will be migrated to categories on load
+  deities: string[]; // Array of deity IDs
   status: 'brewing' | 'stirring' | 'spilled';
   results: ManifestationResult[];
   createdAt: string;
@@ -23,9 +33,11 @@ export interface JournalEntry {
   id: string;
   date: string;
   notes: string;
-  mood: string;
+  moods: string[];
+  mood?: string; // Legacy support - will be migrated to moods on load
   results?: string;
   cosmicContext?: string;
+  imageUrl?: string; // Image captured during/after ritual
 }
 
 // Standalone journal entry (not tied to a ritual)
@@ -34,15 +46,20 @@ export interface StandaloneJournalEntry {
   date: string;
   title: string;
   notes: string;
-  mood?: string;
+  mood?: string; // Legacy single-mood support - will migrate to moods on load
+  moods?: string[]; // Array of mood IDs - allows multiple moods
   tags: string[];
   type: string; // Dynamic — managed via journalEntryTypes in AppContext
+  imageUrl?: string; // Journal entry image
 }
 
 export interface LibraryRitual {
   id: string;
   name: string;
-  category: string;
+  categories: string[];
+  category?: string; // Legacy support - will be migrated to categories on load
+  deities: string[]; // Array of deity IDs
+  deities_?: string; // LEGACY: for future migration support
   description: string;
   intention: string;
   tangibleOutcome: string;
@@ -51,12 +68,17 @@ export interface LibraryRitual {
   scheduleDetail?: string;
   createdAt: string;
   timesPerformed: number;
+  imageUrl?: string; // Featured image for the spell
+  referenceImages?: string[]; // Multiple reference images (sigils, altar setups, inspiration, etc.)
 }
 
 export interface Ritual {
   id: string;
   name: string;
-  category: string;
+  categories: string[];
+  category?: string; // Legacy support - will be migrated to categories on load
+  deities: string[]; // Array of deity IDs
+  deities_?: string; // LEGACY: for future migration support
   description: string;
   intention: string;
   tangibleOutcome: string;
@@ -73,6 +95,8 @@ export interface Ritual {
   consecutiveDays?: number; // Number of consecutive days this ritual spans
   groupId?: string; // Links consecutive-day ritual entries together
   libraryId?: string; // Links this practice instance back to its Library source
+  imageUrl?: string; // Featured image for the spell
+  referenceImages?: string[]; // Multiple reference images (sigils, altar setups, inspiration, etc.)
 }
 
 // --- Helper Functions ---
@@ -140,10 +164,11 @@ export function getUniqueRitualCounts(rituals: Ritual[]): { scheduled: number; a
 }
 
 export function getRecentActivity(rituals: Ritual[]) {
-  const entries: (JournalEntry & { ritualName: string; ritualId: string; category: string })[] = [];
+  const entries: (JournalEntry & { ritualName: string; ritualId: string; categories: string[]; primaryCategory: string })[] = [];
   rituals.forEach(r => {
+    const categories = r.categories && r.categories.length > 0 ? r.categories : (r.category ? [r.category] : []);
     r.journal.forEach(j => {
-      entries.push({ ...j, ritualName: r.name, ritualId: r.id, category: r.category });
+      entries.push({ ...j, ritualName: r.name, ritualId: r.id, categories, primaryCategory: categories[0] || '' });
     });
   });
   return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());

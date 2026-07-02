@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet,
   KeyboardAvoidingView, Platform, Modal,
@@ -14,48 +14,111 @@ import { theme, getCurrentMoonPhase } from '../constants/theme';
 import { getTodayPlanet } from '../constants/planetaryData';
 import { getCurrentPlanetaryHour } from '../services/planetaryHours';
 import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
 import { useAlert } from '@/template';
 import StarField from '../components/StarField';
+import { LoadingSpinner } from '../components/LoadingSpinner';
+import ImageField from '../components/ImageField';
+import { useForm } from '../hooks/useForm';
+import { validateJournalForm } from '../utils/validationHelpers';
+import { formatFullDateWithDay, formatDateWithShortDay, formatDateWithDayAndYear } from '../utils/dateHelpers';
+import SimpleDatePicker from '../components/SimpleDatePicker';
 
 export default function LogRitualScreen() {
-  const { ritualId, mode } = useLocalSearchParams<{ ritualId: string; mode?: string }>();
+  const { ritualId, mode, returnTo } = useLocalSearchParams<{ ritualId: string; mode?: string; returnTo?: string }>();
   const isReflectMode = mode === 'reflect';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { rituals, addJournalEntry, moods, addMood, deleteMood } = useApp();
   const { showAlert } = useAlert();
+  const { showToast } = useToast();
   const ritual = rituals.find(r => r.id === ritualId);
 
-  const [notes, setNotes] = useState('');
-  const [completedDate, setCompletedDate] = useState<Date>(new Date());
+
+  const todayDateString = useMemo(() => new Date().toDateString(), []);
+
+  // Form state management
+  const form = useForm({
+    initialValues: {
+      notes: '',
+      completedDate: new Date(),
+      selectedMoods: [] as string[],
+      imageUrl: undefined as string | undefined,
+    },
+    validate: (values) => {
+      const errors = validateJournalForm({
+        reflection: values.notes,
+        moods: values.selectedMoods,
+      });
+      return errors.map(e => ({
+        ...e,
+        field: e.field === 'moods' ? 'selectedMoods' : e.field
+      }));
+    },
+    onSubmit: async (values) => {
+      // Will be overridden by handleSaveEntry
+      await new Promise(resolve => setTimeout(resolve, 100));
+    },
+  });
+
   const [showCompletedDatePicker, setShowCompletedDatePicker] = useState(false);
-  const [mood, setMood] = useState('');
   const [isAddingMood, setIsAddingMood] = useState(false);
   const [newMoodText, setNewMoodText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const moonPhase = getCurrentMoonPhase();
   const todayPlanet = getTodayPlanet();
   const currentHour = getCurrentPlanetaryHour();
 
-  const canSave = mood.length > 0;
+  const canSave = form.values.selectedMoods.length > 0 && !form.isSubmitting;
 
-  const handleSave = () => {
-    if (!canSave || !ritualId) return;
+  const handleSaveEntry = async () => {
+    // Validate form before attempting to save
+    if (form.hasErrors()) {
+      const firstError = form.errors[0];
+      showToast(firstError.message, 'error', { duration: 4000 });
+      return;
+    }
 
-    const cosmicParts: string[] = [
-      `${moonPhase.icon} ${moonPhase.name} · ${moonPhase.energy}`,
-      `${todayPlanet.emoji} Day of ${todayPlanet.name}`,
-    ];
-    if (currentHour) cosmicParts.push(`${currentHour.planet.emoji} Hour of ${currentHour.planet.name}`);
+    if (!form.values.selectedMoods.length) {
+      showToast('Please select at least one mood that describes how you felt', 'error', { duration: 4000 });
+      return;
+    }
 
-    addJournalEntry(
-      ritualId,
-      { date: completedDate.toISOString(), notes: notes.trim(), mood, cosmicContext: cosmicParts.join(' · ') },
-      { markComplete: !isReflectMode }
-    );
+    if (!ritualId || isSubmitting) return;
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.back();
+    setIsSubmitting(true);
+    try {
+      const cosmicParts: string[] = [
+        `${moonPhase.icon} ${moonPhase.name} · ${moonPhase.energy}`,
+        `${todayPlanet.emoji} Day of ${todayPlanet.name}`,
+      ];
+      if (currentHour) cosmicParts.push(`${currentHour.planet.emoji} Hour of ${currentHour.planet.name}`);
+
+      addJournalEntry(
+        ritualId,
+        { date: form.values.completedDate.toISOString(), notes: form.values.notes.trim(), moods: form.values.selectedMoods, cosmicContext: cosmicParts.join(' · '), imageUrl: form.values.imageUrl },
+        { markComplete: !isReflectMode }
+      );
+
+      const successMessage = isReflectMode ? 'Reflection saved!' : `"${ritual.name}" logged!`;
+      showToast(successMessage, 'success');
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Navigate based on where user came from
+      if (returnTo) {
+        router.replace(returnTo);
+      } else {
+        router.back();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save. Please try again.';
+      showToast(errorMessage, 'error', { duration: 4000 });
+      console.error('[handleSaveEntry] Error:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!ritual) {
@@ -88,8 +151,8 @@ export default function LogRitualScreen() {
           <MaterialIcons name="close" size={24} color={theme.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}>{isReflectMode ? 'Add Reflection' : 'Log Ritual'}</Text>
-        <Pressable onPress={handleSave} style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]} disabled={!canSave}>
-          <Text style={[styles.saveBtnText, !canSave && styles.saveBtnTextDisabled]}>Save</Text>
+        <Pressable onPress={handleSaveEntry} style={[styles.saveBtn, (!canSave || form.isSubmitting) && styles.saveBtnDisabled]} disabled={!canSave || form.isSubmitting}>
+          <Text style={[styles.saveBtnText, (!canSave || form.isSubmitting) && styles.saveBtnTextDisabled]}>Save</Text>
         </Pressable>
       </View>
 
@@ -99,7 +162,7 @@ export default function LogRitualScreen() {
             <Image source={require('../assets/images/ritual-complete.png')} style={styles.ritualImage} contentFit="contain" />
             <Text style={styles.ritualName}>{ritual.name}</Text>
             <Text style={styles.ritualDate}>
-              {completedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatFullDateWithDay(form.values.completedDate)}
             </Text>
           </View>
 
@@ -108,7 +171,7 @@ export default function LogRitualScreen() {
           <Pressable style={styles.completedDateField} onPress={() => setShowCompletedDatePicker(true)}>
             <MaterialIcons name="event-available" size={20} color={theme.primary} />
             <Text style={styles.completedDateText}>
-              {completedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatDateWithDayAndYear(form.values.completedDate)}
             </Text>
             <MaterialIcons name="edit-calendar" size={18} color={theme.textMuted} />
           </Pressable>
@@ -145,14 +208,56 @@ export default function LogRitualScreen() {
             ) : null}
           </View>
 
-          {/* How do you feel? */}
-          <Text style={styles.label}>How do you feel? *</Text>
+          {/* How do you feel? - Multi-select */}
+          <Text style={styles.label}>How do you feel? * (select one or more)</Text>
+          {form.getFieldError('moods') && <Text style={styles.errorText}>{form.getFieldError('moods')}</Text>}
           <View style={styles.moodGrid}>
-            {moods.map(m => (
-              <Pressable key={m} style={[styles.moodChip, mood === m && styles.moodChipActive]} onPress={() => { setMood(m); Haptics.selectionAsync(); }} onLongPress={() => { showAlert('Delete Mood?', `Remove "${m}" from your mood options?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { deleteMood(m); if (mood === m) setMood(''); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } }]); }} delayLongPress={500}>
-                <Text style={[styles.moodChipText, mood === m && styles.moodChipTextActive]}>{m}</Text>
-              </Pressable>
-            ))}
+            {moods.map(m => {
+              const isSelected = form.values.selectedMoods.includes(m);
+              return (
+                <Pressable
+                  key={m}
+                  style={[styles.moodChip, isSelected && styles.moodChipActive]}
+                  onPress={() => {
+                    if (isSelected) {
+                      // Don't allow deselecting if it's the only one
+                      if (form.values.selectedMoods.length > 1) {
+                        form.setFieldValue('selectedMoods', form.values.selectedMoods.filter(mood => mood !== m));
+                        Haptics.selectionAsync();
+                      }
+                    } else {
+                      // Allow adding multiple moods (no maximum)
+                      form.setFieldValue('selectedMoods', [...form.values.selectedMoods, m]);
+                      Haptics.selectionAsync();
+                    }
+                  }}
+                  onLongPress={() => {
+                    showAlert('Delete Mood?', `Remove "${m}" from your mood options?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          deleteMood(m);
+                          if (isSelected) {
+                            form.setFieldValue('selectedMoods', form.values.selectedMoods.filter(mood => mood !== m));
+                          }
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                        }
+                      }
+                    ]);
+                  }}
+                  delayLongPress={500}
+                >
+                  <View style={styles.moodCheckmark}>
+                    <Text style={[styles.moodChipText, isSelected && styles.moodChipTextActive]}>{m}</Text>
+                    {isSelected && (
+                      <MaterialIcons name="check" size={14} color={theme.primary} />
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
             {isAddingMood ? (
               <View style={styles.moodAddInline}>
                 <TextInput style={styles.moodAddInput} value={newMoodText} onChangeText={setNewMoodText} placeholder="New mood..." placeholderTextColor={theme.textMuted} autoFocus onSubmitEditing={() => { if (newMoodText.trim()) { addMood(newMoodText.trim()); setNewMoodText(''); } setIsAddingMood(false); }} returnKeyType="done" />
@@ -169,54 +274,55 @@ export default function LogRitualScreen() {
 
           {/* Notes */}
           <Text style={styles.label}>Notes</Text>
-          <TextInput style={[styles.input, styles.textArea]} value={notes} onChangeText={setNotes} placeholder="Describe your experience... What happened? What did you notice? How did the energy feel?" placeholderTextColor={theme.textMuted} multiline textAlignVertical="top" />
+          <TextInput style={[styles.input, styles.textArea]} value={form.values.notes} onChangeText={form.handleChange('notes')} placeholder="Describe your experience... What happened? What did you notice? How did the energy feel?" placeholderTextColor={theme.textMuted} multiline textAlignVertical="top" />
+
+          {/* Image Upload */}
+          <ImageField
+            imageUrl={form.values.imageUrl}
+            onImageChange={(url) => form.setFieldValue('imageUrl', url)}
+            fieldLabel="Ritual Photo"
+            hint="Document your ritual setup or results"
+            uploadLabel="Add Ritual Photo"
+            showCameraOption={true}
+            previewSize={200}
+          />
         </ScrollView>
 
-        {/* Completed Date Picker Modal */}
-        <Modal visible={showCompletedDatePicker} transparent animationType="slide">
-          <Pressable style={styles.dateModalOverlay} onPress={() => setShowCompletedDatePicker(false)}>
-            <Pressable style={styles.dateModalContent} onPress={() => {}}>
-              <View style={styles.dateModalHeader}>
-                <Text style={styles.dateModalTitle}>Date Completed</Text>
-                <Pressable onPress={() => setShowCompletedDatePicker(false)} style={styles.dateModalClose}>
-                  <MaterialIcons name="close" size={22} color={theme.textPrimary} />
-                </Pressable>
-              </View>
-              <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-                {(() => {
-                  const options: Date[] = [];
-                  const now = new Date();
-                  for (let i = 0; i < 60; i++) {
-                    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-                    options.push(d);
-                  }
-                  return options;
-                })().map((d, i) => {
-                  const isSelected = d.toDateString() === completedDate.toDateString();
-                  const isToday = d.toDateString() === new Date().toDateString();
-                  return (
-                    <Pressable
-                      key={i}
-                      style={[styles.dateOption, isSelected && styles.dateOptionActive]}
-                      onPress={() => { setCompletedDate(d); setShowCompletedDatePicker(false); Haptics.selectionAsync(); }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.dateOptionText, isSelected && styles.dateOptionTextActive]}>
-                          {d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' })}
-                          {isToday ? '  (Today)' : ''}
-                        </Text>
-                      </View>
-                      {isSelected ? <MaterialIcons name="check-circle" size={20} color={theme.primary} /> : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      
       </KeyboardAvoidingView>
+
+      {/* Loading overlay */}
+      {isSubmitting && (
+        <Modal transparent={true} visible={isSubmitting} animationType="none">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: theme.backgroundSecondary, borderRadius: theme.radius.lg, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+              <LoadingSpinner size={52} color={theme.primary} />
+              <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '600', color: theme.textPrimary }}>Logging ritual...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
       </SafeAreaView>
+
+      {/* Date Picker Modal */}
+      <Modal transparent visible={showCompletedDatePicker} animationType="slide">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: theme.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 20, paddingHorizontal: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary }}>Select Date</Text>
+              <Pressable onPress={() => setShowCompletedDatePicker(false)}>
+                <MaterialIcons name="close" size={24} color={theme.textPrimary} />
+              </Pressable>
+            </View>
+            <SimpleDatePicker
+              selectedDate={form.values.completedDate}
+              onSelectDate={(date) => {
+                form.setFieldValue('completedDate', date);
+                setShowCompletedDatePicker(false);
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -238,8 +344,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface, borderRadius: theme.radius.md,
     padding: 14, borderWidth: 1, borderColor: theme.primary + '30',
   },
-  completedDateText: { flex: 1, fontSize: 15, color: theme.textPrimary, fontWeight: '500' },
-  completedDateHint: { fontSize: 12, color: theme.textMuted, marginTop: 6, marginLeft: 4, fontStyle: 'italic' },
+  completedDateText: { flex: 1, fontSize: 15, color: theme.textPrimary, fontWeight: '600' },
+  completedDateHint: { fontSize: 12, color: theme.textSecondary, marginTop: 6, marginLeft: 4, fontStyle: 'italic' },
 
   // Cosmic Context
   cosmicCard: { backgroundColor: theme.surface, borderRadius: theme.radius.md, padding: 14, marginTop: 16, borderWidth: 1, borderColor: theme.primary + '20', ...theme.shadows.card },
@@ -249,7 +355,8 @@ const styles = StyleSheet.create({
   cosmicSub: { fontSize: 11, color: theme.textSecondary },
   cosmicDivider: { height: 1, backgroundColor: theme.border + '60', marginVertical: 6 },
 
-  label: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginTop: 24, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  label: { fontSize: 13, fontWeight: '700', color: theme.textPrimary, marginTop: 24, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  errorText: { fontSize: 12, color: theme.error, marginTop: -6, marginBottom: 8, marginLeft: 4, fontWeight: '500' },
   moodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   moodChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border },
   moodChipActive: { backgroundColor: theme.primary + '20', borderColor: theme.primary },
@@ -263,21 +370,6 @@ const styles = StyleSheet.create({
   input: { backgroundColor: theme.surface, borderRadius: theme.radius.md, padding: 14, fontSize: 15, color: theme.textPrimary, borderWidth: 1, borderColor: theme.border },
   textArea: { minHeight: 120, paddingTop: 14, lineHeight: 22 },
 
-
-  // Date Picker Modal
-  dateModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  dateModalContent: { backgroundColor: '#231248', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, maxHeight: '60%' },
-  dateModalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 16, borderBottomWidth: 1, borderBottomColor: theme.border,
-  },
-  dateModalTitle: { fontSize: 17, fontWeight: '700', color: theme.textPrimary },
-  dateModalClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surfaceLight, alignItems: 'center', justifyContent: 'center' },
-  dateOption: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: theme.border + '40',
-  },
-  dateOptionActive: { backgroundColor: theme.primary + '12' },
-  dateOptionText: { fontSize: 15, color: theme.textPrimary, fontWeight: '500' },
-  dateOptionTextActive: { color: theme.primary, fontWeight: '700' },
+  hint: { fontSize: 12, color: theme.textMuted, marginTop: 4, marginLeft: 4, fontStyle: 'italic', marginBottom: 8 },
+  moodCheckmark: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 });

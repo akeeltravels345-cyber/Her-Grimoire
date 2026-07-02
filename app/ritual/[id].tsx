@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -10,9 +10,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
 import { useAlert } from '@/template';
-import { getComputedStatus, getDaysUntil as getDaysUntilCount } from '../../services/mockData';
+import { getComputedStatus, getDaysUntil as getDaysUntilCount, Ritual } from '../../services/mockData';
 import StarField from '../../components/StarField';
+import ImageDisplay from '../../components/ImageDisplay';
+import { RitualHeader } from '../../components/RitualHeader';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { DetailPageSkeleton } from '../../components/LoadingSkeleton';
 import { resolveCategoryColor, resolveCategory } from '../../utils/categoryHelpers';
+import { formatFullDate, formatFullDateWithDay, getCountdownLabel, getDaysUntil, formatShortDate, formatDateWithShortDay, formatDateWithDayAndYear, formatDateWithLongDay, formatShortMonthYear } from '../../utils/dateHelpers';
+import SimpleDatePicker from '../../components/SimpleDatePicker';
 
 const scheduleLabels: Record<string, string> = {
   daily: 'Daily', weekly: 'Weekly', moon_phase: 'Moon Phase', as_needed: 'As Needed', monthly: 'Monthly',
@@ -33,7 +39,7 @@ export default function RitualDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { rituals, categories, categoryColors, manifestations, updateRitual, deleteRitual, deleteFutureInSeries, deleteEntireSeries, stopSchedule, updateStatus } = useApp();
+  const { rituals, categories, categoryColors, deities, deityColors, manifestations, updateRitual, deleteRitual, deleteFutureInSeries, deleteEntireSeries, stopSchedule, updateStatus, addRitual, deleteManifestationRecord } = useApp();
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -41,20 +47,20 @@ export default function RitualDetailScreen() {
   const [editDescription, setEditDescription] = useState('');
   const [editIntention, setEditIntention] = useState('');
   const [editTangibleOutcome, setEditTangibleOutcome] = useState('');
-  const [editCategory, setEditCategory] = useState('');
-  const [editIngredients, setEditIngredients] = useState(''); const [editScheduledDate, setEditScheduledDate] = useState<string | undefined>(undefined);
-const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [editCategories, setEditCategories] = useState<string[]>([]);
+  const [editCategory, setEditCategory] = useState(''); // Legacy support
+  const [editDeities, setEditDeities] = useState<string[]>([]);
+  const [editIngredients, setEditIngredients] = useState('');
+  const [editScheduledDate, setEditScheduledDate] = useState<string | undefined>(undefined);
+  const [editSchedule, setEditSchedule] = useState('');
+  const [editScheduleDetail, setEditScheduleDetail] = useState<string | undefined>(undefined);
+  const [editConsecutiveDays, setEditConsecutiveDays] = useState<number>(1);
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState<string | undefined>(undefined);
+  const [isSaving, setIsSaving] = useState(false);
   const { showAlert } = useAlert();
   const ritual = rituals.find(r => r.id === id);
-  const editDateOptions: Date[] = [];
-  const editDateStart = new Date();
-  editDateStart.setHours(0, 0, 0, 0);
-  editDateStart.setDate(editDateStart.getDate() - 30); // allow 30 days back
-  for (let i = 0; i < 121; i++) { // 30 past + today + 90 future
-    const d = new Date(editDateStart);
-    d.setDate(d.getDate() + i);
-    editDateOptions.push(d);
-  }
 
   if (!ritual) {
     return (
@@ -72,9 +78,18 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
     );
   }
 
-  const category = resolveCategory(ritual.category, categories);
-  const catColor = resolveCategoryColor(ritual.category, categoryColors, categories);
-  const manif = manifestations.find(m => m.ritualId === ritual.id);
+  // Handle both legacy (category) and new (categories) formats
+  const categoryIds = ritual.categories && ritual.categories.length > 0 ? ritual.categories : (ritual.category ? [ritual.category] : []);
+  const primaryCategoryId = categoryIds[0];
+  const category = resolveCategory(primaryCategoryId, categories);
+  const catColor = resolveCategoryColor(primaryCategoryId, categoryColors, categories);
+  const allCategories = categoryIds.map(cid => resolveCategory(cid, categories)).filter(Boolean);
+  // For series/group rituals, look up by series/group manifestation ID; for others, look by ritualId
+  const manif = ritual.seriesId
+    ? manifestations.find(m => m.id === 'mf_series_' + ritual.seriesId)
+    : ritual.groupId
+    ? manifestations.find(m => m.id === 'mf_group_' + ritual.groupId)
+    : manifestations.find(m => m.ritualId === ritual.id);
 
   const computedStatus = getComputedStatus(ritual);
   const csColor = computedStatus === 'completed' ? theme.success
@@ -112,8 +127,15 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
     setEditDescription(ritual.description);
     setEditIntention(ritual.intention);
     setEditTangibleOutcome(ritual.tangibleOutcome || '');
-    setEditCategory(ritual.category);
-    setEditIngredients(ritual.ingredients ? ritual.ingredients.join(',') : ''); setEditScheduledDate(ritual.scheduledDate);
+    const catIds = ritual.categories && ritual.categories.length > 0 ? ritual.categories : (ritual.category ? [ritual.category] : []);
+    setEditCategories(catIds);
+    setEditCategory(catIds[0] || ''); // Legacy support
+    setEditDeities(ritual.deities || []);
+    setEditIngredients(ritual.ingredients ? ritual.ingredients.join(',') : '');
+    setEditScheduledDate(ritual.scheduledDate);
+    setEditSchedule(ritual.schedule);
+    setEditScheduleDetail(ritual.scheduleDetail);
+    setEditConsecutiveDays(ritual.consecutiveDays || 1);
     setIsEditing(true);
     Haptics.selectionAsync();
   };
@@ -123,31 +145,186 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
     Haptics.selectionAsync();
   };
 
-  const saveEdits = () => {
+  const saveEdits = async () => {
     if (!ritual || !editName.trim()) return;
-    updateRitual(ritual.id, {
-      name: editName.trim(),
-      description: editDescription.trim(),
-      intention: editIntention.trim(),
-      tangibleOutcome: editTangibleOutcome.trim(),
-      category: editCategory,
-      ingredients: editIngredients.trim() ? editIngredients.split(',').map(i => i.trim()).filter(Boolean) : undefined,
-      scheduledDate: editScheduledDate,
-    });
-    setIsEditing(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    setIsSaving(true);
+    try {
+      const currentConsecutiveDays = ritual.consecutiveDays || 1;
+      const newConsecutiveDays = editConsecutiveDays;
+
+      updateRitual(ritual.id, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        intention: editIntention.trim(),
+        tangibleOutcome: editTangibleOutcome.trim(),
+        categories: editCategories.length > 0 ? editCategories : [editCategory],
+        deities: editDeities,
+        ingredients: editIngredients.trim() ? editIngredients.split(',').map(i => i.trim()).filter(Boolean) : undefined,
+        scheduledDate: editScheduledDate,
+        schedule: editSchedule as Ritual['schedule'],
+        scheduleDetail: editScheduleDetail,
+        consecutiveDays: newConsecutiveDays,
+      });
+
+    // If extending a group ritual, create new rituals for the additional days
+    if (ritual.groupId && newConsecutiveDays > currentConsecutiveDays && editScheduledDate) {
+      const baseDate = new Date(editScheduledDate);
+      const newRituals: Ritual[] = [];
+
+      for (let i = currentConsecutiveDays; i < newConsecutiveDays; i++) {
+        const d = new Date(baseDate);
+        d.setDate(d.getDate() + i);
+        newRituals.push({
+          ...ritual,
+          id: ritual.id + '_g' + (i + 1),
+          name: `${editName.trim()} — Day ${i + 1} of ${newConsecutiveDays}`,
+          deities: editDeities,
+          groupId: ritual.groupId,
+          consecutiveDays: newConsecutiveDays,
+          createdAt: new Date().toISOString(),
+          timesPerformed: 0,
+          journal: [],
+          status: 'scheduled',
+          scheduledDate: d.toISOString(),
+        });
+      }
+
+      if (newRituals.length > 0) {
+        rituals.push(...newRituals);
+      }
+    }
+
+      setIsEditing(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleReschedule = () => {
-    updateStatus(ritual.id, 'scheduled');
+    setShowRescheduleModal(true);
+    setRescheduleDate(undefined);
+  };
+
+  const handleRescheduleConfirm = () => {
+    if (!ritual || !rescheduleDate) return;
+
+    // Create a new ritual instance with the selected date
+    const catIds = ritual.categories && ritual.categories.length > 0 ? ritual.categories : (ritual.category ? [ritual.category] : []);
+    addRitual({
+      name: ritual.name,
+      categories: catIds,
+      deities: ritual.deities || [],
+      intention: ritual.intention,
+      description: ritual.description,
+      tangibleOutcome: ritual.tangibleOutcome,
+      ingredients: ritual.ingredients,
+      schedule: ritual.schedule,
+      scheduleDetail: ritual.scheduleDetail,
+      imageUrl: ritual.imageUrl,
+      referenceImages: ritual.referenceImages,
+      libraryId: ritual.libraryId,
+      scheduledDate: rescheduleDate,
+    });
+
+    setShowRescheduleModal(false);
+    setRescheduleDate(undefined);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    router.back();
   };
 
   const handleDelete = () => {
-    if (isPartOfSeries) {
+    // Helper function to show history choice dialog
+    const showHistoryChoice = (onDeleteInstance: () => void, onDeleteWithHistory: () => void) => {
+      showAlert(
+        'How to Delete?',
+        'Keep your practice history and journal entries, or delete everything?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Keep History', style: 'default', onPress: () => { deleteRitual(ritual.id, false); onDeleteInstance(); } },
+          { text: 'Delete All', style: 'destructive', onPress: () => { deleteRitual(ritual.id, true); onDeleteWithHistory(); } },
+        ]
+      );
+    };
+
+    const groupSize = ritual.groupId ? rituals.filter(r => r.groupId === ritual.groupId).length : 0;
+
+    if (ritual.groupId && groupSize > 1) {
+      // Handle consecutive day group deletion
       const buttons: any[] = [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'This Only', onPress: () => { deleteRitual(ritual.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); } },
+        {
+          text: `This Day Only`,
+          onPress: () => {
+            showHistoryChoice(
+              () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); },
+              () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); }
+            );
+          }
+        },
+      ];
+
+      buttons.push({
+        text: `Entire ${groupSize}-Day Streak`,
+        style: 'destructive',
+        onPress: () => {
+          const groupRituals = rituals.filter(r => r.groupId === ritual.groupId);
+          showAlert(
+            'Delete Entire Streak?',
+            `Delete all ${groupSize} rituals in this consecutive-day streak and their history?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Keep History',
+                onPress: () => {
+                  groupRituals.forEach(r => deleteRitual(r.id, false));
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                  router.back();
+                }
+              },
+              {
+                text: 'Delete All',
+                style: 'destructive',
+                onPress: () => {
+                  groupRituals.forEach(r => deleteRitual(r.id, true));
+                  // Explicitly delete all manifestations associated with this group
+                  if (ritual.groupId) {
+                    // Delete by group ID (new format)
+                    const groupManif = manifestations.find(m => m.id === 'mf_group_' + ritual.groupId);
+                    if (groupManif) deleteManifestationRecord(groupManif.id);
+                    // Also delete any old-format manifestations for rituals in this group (backwards compatibility)
+                    groupRituals.forEach(r => {
+                      const oldManif = manifestations.find(m => m.id === 'mf_' + r.id);
+                      if (oldManif) deleteManifestationRecord(oldManif.id);
+                    });
+                  }
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                  router.back();
+                }
+              },
+            ]
+          );
+        },
+      });
+
+      showAlert(
+        'Delete Ritual',
+        `This is part of a ${groupSize}-day streak. What would you like to delete?`,
+        buttons
+      );
+    } else if (isPartOfSeries) {
+      const buttons: any[] = [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'This Only',
+          onPress: () => {
+            showHistoryChoice(
+              () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); },
+              () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); }
+            );
+          }
+        },
       ];
 
       if (futureInSeries > 0 && ritual.scheduledDate) {
@@ -155,9 +332,37 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
           text: `This & Future (${futureInSeries})`,
           style: 'destructive',
           onPress: () => {
-            deleteFutureInSeries(ritual.seriesId!, ritual.scheduledDate!);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            router.back();
+            showAlert(
+              'Delete Future Rituals?',
+              `Delete this and ${futureInSeries - 1} future ritual${futureInSeries - 1 === 1 ? '' : 's'}. Keep or delete their history?`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Keep History',
+                  onPress: () => {
+                    // Delete future but preserve history
+                    const futureRituals = rituals.filter(r =>
+                      r.seriesId === ritual.seriesId &&
+                      r.status !== 'completed' &&
+                      r.scheduledDate &&
+                      new Date(r.scheduledDate).getTime() >= new Date(ritual.scheduledDate || '').getTime()
+                    );
+                    futureRituals.forEach(r => deleteRitual(r.id, false));
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    router.back();
+                  }
+                },
+                {
+                  text: 'Delete All',
+                  style: 'destructive',
+                  onPress: () => {
+                    deleteFutureInSeries(ritual.seriesId!, ritual.scheduledDate!);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    router.back();
+                  }
+                },
+              ]
+            );
           },
         });
       }
@@ -168,10 +373,10 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
         buttons
       );
     } else {
-      showAlert('Delete Ritual', `Are you sure you want to delete "${ritual.name}"?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => { deleteRitual(ritual.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); router.back(); } },
-      ]);
+      showHistoryChoice(
+        () => { router.back(); },
+        () => { router.back(); }
+      );
     }
   };
 
@@ -240,6 +445,18 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
           </Pressable>
         ) : (
           <>
+            {computedStatus === 'completed' ? (
+              <Pressable
+                onPress={() => {
+                  updateStatus(ritual.id, 'scheduled');
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+                style={styles.headerBtn}
+                hitSlop={8}
+              >
+                <MaterialIcons name="undo" size={22} color={theme.error} />
+              </Pressable>
+            ) : null}
             <Pressable onPress={startEditing} style={styles.headerBtn}>
               <MaterialIcons name="edit" size={22} color={theme.accent} />
             </Pressable>
@@ -257,75 +474,58 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 100 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Ritual Header */}
-        <View style={styles.ritualHeader}>
-          {isEditing ? (
-            <>
-              {/* Category Picker */}
-              <Text style={styles.editFieldLabel}>Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.editCatScroll} contentContainerStyle={styles.editCatRow}>
-                {categories.map(cat => {
-                  const cColor = categoryColors[cat.id] || theme.accent;
-                  const isActive = editCategory === cat.id;
-                  return (
-                    <Pressable key={cat.id}
-                      style={[styles.editCatChip, isActive && { backgroundColor: cColor + '20', borderColor: cColor }]}
-                      onPress={() => { setEditCategory(cat.id); Haptics.selectionAsync(); }}>
-                      <MaterialIcons name={cat.icon as keyof typeof MaterialIcons.glyphMap} size={18} color={isActive ? cColor : theme.textMuted} />
-                      <Text style={[styles.editCatChipText, isActive && { color: cColor }]}>{cat.name}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+        {/* Ritual Header - Now Uses Extracted Component */}
+        <RitualHeader
+          ritual={ritual}
+          isEditing={isEditing}
+          editName={editName}
+          editCategories={editCategories}
+          editDeities={editDeities}
+          categories={categories}
+          categoryColors={categoryColors}
+          deities={deities}
+          deityColors={deityColors}
+          catColor={catColor}
+          onEditName={setEditName}
+          onEditCategories={setEditCategories}
+          onEditDeities={setEditDeities}
+        />
 
-              {/* Name */}
-              <Text style={styles.editFieldLabel}>Ritual Name</Text>
-              <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholder="Ritual name..." placeholderTextColor={theme.textMuted} />
-            </>
-          ) : (
-            <>
-              <View style={[styles.categoryRing, { borderColor: catColor + '50' }]}>
-                <View style={[styles.categoryBadge, { backgroundColor: catColor + '20' }]}>
-                  <MaterialIcons name={(category?.icon || 'auto-fix-high') as keyof typeof MaterialIcons.glyphMap} size={32} color={catColor} />
-                </View>
+        {!isEditing && (
+          <View style={styles.tagRow}>
+            <View style={styles.tag}>
+              <MaterialIcons name="schedule" size={12} color={theme.textSecondary} />
+              <Text style={styles.tagText}>{getScheduleLabel(ritual.schedule, ritual.scheduleDetail)}</Text>
+            </View>
+            <View style={[styles.tag, { backgroundColor: msStyle.color + '20' }]}>
+              <MaterialIcons name={msStyle.icon} size={12} color={msStyle.color} />
+              <Text style={[styles.tagText, { color: msStyle.color }]}>{msStyle.label}</Text>
+            </View>
+            {(isPartOfSeries || Boolean(ritual.groupId)) ? (
+              <View style={[styles.tag, { backgroundColor: theme.accent + '15' }]}>
+                <MaterialIcons name="repeat" size={12} color={theme.accent} />
+                <Text style={[styles.tagText, { color: theme.accent }]}>
+                  {isPartOfSeries ? `Series (${seriesCount})` : `Group (${rituals.filter(r => r.groupId === ritual.groupId).length})`}
+                </Text>
               </View>
-              <Text style={styles.ritualName}>{ritual.name}</Text>
-              <View style={styles.nameSeparator}>
-                <View style={[styles.nameSeparatorLine, { backgroundColor: catColor + '50' }]} />
-                <MaterialIcons name="auto-awesome" size={11} color={catColor} style={{ marginHorizontal: 8 }} />
-                <View style={[styles.nameSeparatorLine, { backgroundColor: catColor + '50' }]} />
-              </View>
-              <View style={styles.tagRow}>
-                <View style={[styles.tag, { backgroundColor: catColor + '20' }]}>
-                  <Text style={[styles.tagText, { color: catColor }]}>{category?.name || ritual.category}</Text>
-                </View>
-                <View style={styles.tag}>
-                  <MaterialIcons name="schedule" size={12} color={theme.textSecondary} />
-                  <Text style={styles.tagText}>{getScheduleLabel(ritual.schedule, ritual.scheduleDetail)}</Text>
-                </View>
-                <View style={[styles.tag, { backgroundColor: msStyle.color + '20' }]}>
-                  <MaterialIcons name={msStyle.icon} size={12} color={msStyle.color} />
-                  <Text style={[styles.tagText, { color: msStyle.color }]}>{msStyle.label}</Text>
-                </View>
-                {(isPartOfSeries || Boolean(ritual.groupId)) ? (
-                  <View style={[styles.tag, { backgroundColor: theme.accent + '15' }]}>
-                    <MaterialIcons name="repeat" size={12} color={theme.accent} />
-                    <Text style={[styles.tagText, { color: theme.accent }]}>
-                      {isPartOfSeries ? `Series (${seriesCount})` : `Group (${rituals.filter(r => r.groupId === ritual.groupId).length})`}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </>
-          )}
-        </View>
+            ) : null}
+          </View>
+        )}
+
+        {/* Ritual Image */}
+        {ritual.imageUrl ? (
+          <View style={styles.imageSection}>
+            <Text style={styles.imageSectionLabel}>RITUAL REFERENCE IMAGE</Text>
+            <ImageDisplay imageUri={ritual.imageUrl} size={220} />
+          </View>
+        ) : null}
 
         {/* Status Bar */}
         <View style={[styles.statusBar, { borderLeftColor: csColor, backgroundColor: csColor + '08' }]}>
           <MaterialIcons name={csIcon} size={16} color={csColor} />
           <Text style={[styles.statusBarLabel, { color: csColor }]}>
             {csLabel}{ritual.scheduledDate
-              ? ` · ${new Date(ritual.scheduledDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+              ? ` · ${formatFullDate(ritual.scheduledDate)}`
               : ''}
           </Text>
           {(computedStatus === 'approaching' || computedStatus === 'overdue') && countdownLabel ? (
@@ -361,7 +561,7 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statValue}>
-              {ritual.lastPerformed ? new Date(ritual.lastPerformed).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Never'}
+              {ritual.lastPerformed ? formatShortDate(ritual.lastPerformed) : 'Never'}
             </Text>
             <Text style={styles.statLabel}>Last Done</Text>
           </View>
@@ -473,6 +673,59 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   </View>
 ) : null}
 
+        {/* Reference Images */}
+        {ritual.referenceImages && ritual.referenceImages.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>REFERENCE IMAGES</Text>
+            <View style={styles.referenceImagesGrid}>
+              {ritual.referenceImages.map((imgUrl, idx) => (
+                <ImageDisplay key={idx} imageUri={imgUrl} size={120} />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Schedule Type */}
+        {isEditing ? (
+          <View style={styles.editSection}>
+            <Text style={styles.editFieldLabel}>Schedule Type</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              {(['as_needed', 'daily', 'weekly', 'monthly', 'moon_phase'] as const).map(s => {
+                const label = scheduleLabels[s];
+                const isActive = editSchedule === s;
+                return (
+                  <Pressable
+                    key={s}
+                    style={[styles.editInput, { flex: 0, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: isActive ? theme.primary + '20' : theme.surface, borderColor: isActive ? theme.primary : theme.border }]}
+                    onPress={() => { setEditSchedule(s); if (s !== 'moon_phase') setEditScheduleDetail(undefined); Haptics.selectionAsync(); }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: isActive ? theme.primary : theme.textSecondary }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {editSchedule === 'moon_phase' && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={[styles.editFieldLabel, { fontSize: 11, marginBottom: 6 }]}>Moon Phase</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {MOON_PHASE_NAMES.map((name, idx) => {
+                    const isActive = editScheduleDetail === String(idx);
+                    return (
+                      <Pressable
+                        key={idx}
+                        style={[styles.editInput, { flex: 0, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isActive ? theme.primary + '20' : theme.surface, borderColor: isActive ? theme.primary : theme.border }]}
+                        onPress={() => { setEditScheduleDetail(String(idx)); Haptics.selectionAsync(); }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: isActive ? theme.primary : theme.textSecondary }}>{MOON_PHASE_EMOJIS[idx]} {name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         {/* Scheduled Date */}
         {isEditing ? (
           <View style={styles.editSection}>
@@ -480,49 +733,71 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
             <Pressable style={styles.editInput} onPress={() => setShowEditDatePicker(true)}>
               <Text style={{ color: editScheduledDate ? theme.textPrimary : theme.textMuted, fontSize: 15 }}>
                 {editScheduledDate
-                  ? new Date(editScheduledDate).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
+                  ? formatDateWithDayAndYear(editScheduledDate)
                   : 'No date set — tap to add'}
               </Text>
             </Pressable>
           </View>
         ) : null}
 
+        {/* Consecutive Days */}
+        {isEditing && ritual.groupId ? (
+          <View style={styles.editSection}>
+            <Text style={styles.editFieldLabel}>Duration (Days)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Pressable
+                style={[styles.editInput, { flex: 0, width: 60, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center' }]}
+                onPress={() => setEditConsecutiveDays(Math.max(1, editConsecutiveDays - 1))}
+              >
+                <MaterialIcons name="remove" size={20} color={theme.accent} />
+              </Pressable>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, minWidth: 40, textAlign: 'center' }}>
+                {editConsecutiveDays}
+              </Text>
+              <Pressable
+                style={[styles.editInput, { flex: 0, width: 60, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center' }]}
+                onPress={() => setEditConsecutiveDays(editConsecutiveDays + 1)}
+              >
+                <MaterialIcons name="add" size={20} color={theme.accent} />
+              </Pressable>
+            </View>
+            {editConsecutiveDays > (ritual.consecutiveDays || 1) && (
+              <Text style={{ fontSize: 12, color: theme.success, marginTop: 8 }}>
+                Will add {editConsecutiveDays - (ritual.consecutiveDays || 1)} new day(s)
+              </Text>
+            )}
+          </View>
+        ) : null}
+
         <Modal visible={showEditDatePicker} transparent animationType="slide">
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} onPress={() => setShowEditDatePicker(false)}>
-            <Pressable style={{ backgroundColor: theme.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, maxHeight: '60%' }} onPress={() => {}}>
+            <Pressable style={{ backgroundColor: theme.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, maxHeight: '80%' }} onPress={() => {}}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: theme.border }}>
                 <Text style={{ fontSize: 17, fontWeight: '700', color: theme.textPrimary }}>Select Date</Text>
                 <Pressable onPress={() => setShowEditDatePicker(false)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surfaceLight, alignItems: 'center', justifyContent: 'center' }}>
                   <MaterialIcons name="close" size={22} color={theme.textPrimary} />
                 </Pressable>
               </View>
-              <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+              <ScrollView style={{ paddingHorizontal: 16, paddingVertical: 16 }} showsVerticalScrollIndicator={false}>
+                <SimpleDatePicker
+                  selectedDate={editScheduledDate ? new Date(editScheduledDate) : new Date()}
+                  onSelectDate={(date) => {
+                    setEditScheduledDate(date.toISOString());
+                    setShowEditDatePicker(false);
+                    Haptics.selectionAsync();
+                  }}
+                  minDate={(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })()}
+                  maxDate={(() => { const d = new Date(); d.setDate(d.getDate() + 90); return d; })()}
+                />
                 {editScheduledDate ? (
                   <Pressable
-                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border + '40', backgroundColor: theme.error + '10' }}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, marginTop: 12, borderRadius: theme.radius.md, backgroundColor: theme.error + '10', borderWidth: 1, borderColor: theme.error + '30' }}
                     onPress={() => { setEditScheduledDate(undefined); setShowEditDatePicker(false); }}
                   >
                     <MaterialIcons name="close" size={18} color={theme.error} />
-                    <Text style={{ fontSize: 15, color: theme.error, fontWeight: '600', marginLeft: 10 }}>Remove date</Text>
+                    <Text style={{ fontSize: 14, color: theme.error, fontWeight: '600', marginLeft: 10 }}>Remove date</Text>
                   </Pressable>
                 ) : null}
-                {editDateOptions.map((d, i) => {
-                  const isSelected = editScheduledDate && d.toDateString() === new Date(editScheduledDate).toDateString();
-                  const isToday = d.toDateString() === new Date().toDateString();
-                  return (
-                    <Pressable
-                      key={i}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border + '40', backgroundColor: isSelected ? theme.primary + '12' : 'transparent' }}
-                      onPress={() => { setEditScheduledDate(d.toISOString()); setShowEditDatePicker(false); Haptics.selectionAsync(); }}
-                    >
-                      <Text style={{ flex: 1, fontSize: 15, color: isSelected ? theme.primary : theme.textPrimary, fontWeight: isSelected ? '700' : '500' }}>
-                        {d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' })}
-                        {isToday ? '  (Today)' : ''}
-                      </Text>
-                      {isSelected ? <MaterialIcons name="check-circle" size={20} color={theme.primary} /> : null}
-                    </Pressable>
-                  );
-                })}
               </ScrollView>
             </Pressable>
           </Pressable>
@@ -572,7 +847,7 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
                         {r.type === 'manifested' ? '⭐ Spilled' : `${r.signType ? { dream: '🌙', omen: '🦅', encounter: '👁️', symbol: '✦', number: '🔢', synchronicity: '✨' }[r.signType] ?? '✦' : '✦'} Sign`}
                       </Text>
                       <Text style={styles.manifResultDate}>
-                        {new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {formatShortDate(r.date)}
                       </Text>
                     </View>
                     <Text style={styles.manifResultNote}>{r.note}</Text>
@@ -619,14 +894,19 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
                 <View style={styles.journalEntryHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.journalDate}>
-                      {new Date(entry.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                      {formatDateWithLongDay(entry.date)}
                     </Text>
                     {entry.cosmicContext ? (
                       <Text style={styles.journalCosmic}>{entry.cosmicContext}</Text>
                     ) : null}
                   </View>
-                  <View style={[styles.moodBadge, { backgroundColor: catColor + '18' }]}>
-                    <Text style={[styles.moodText, { color: catColor }]}>{entry.mood}</Text>
+                  {/* Display all moods, or fallback to single mood for legacy entries */}
+                  <View style={styles.moodBadges}>
+                    {(entry.moods && entry.moods.length > 0 ? entry.moods : (entry.mood ? [entry.mood] : [])).map((m, idx) => (
+                      <View key={idx} style={[styles.moodBadge, { backgroundColor: catColor + '18' }]}>
+                        <Text style={[styles.moodText, { color: catColor }]}>{m}</Text>
+                      </View>
+                    ))}
                   </View>
                   <MaterialIcons name="chevron-right" size={18} color={theme.textMuted} style={{ marginLeft: 4 }} />
                 </View>
@@ -638,33 +918,109 @@ const [showEditDatePicker, setShowEditDatePicker] = useState(false);
       </ScrollView>
       </KeyboardAvoidingView>
 
+      {/* Reschedule Modal */}
+      <Modal visible={showRescheduleModal} transparent animationType="slide">
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} onPress={() => setShowRescheduleModal(false)}>
+          <Pressable style={{ backgroundColor: theme.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, maxHeight: '80%' }} onPress={() => {}}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <Text style={{ fontSize: 17, fontWeight: '700', color: theme.textPrimary }}>Reschedule Spell</Text>
+              <Pressable onPress={() => setShowRescheduleModal(false)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surfaceLight, alignItems: 'center', justifyContent: 'center' }}>
+                <MaterialIcons name="close" size={22} color={theme.textPrimary} />
+              </Pressable>
+            </View>
+            <ScrollView style={{ paddingHorizontal: 16, paddingVertical: 16 }} showsVerticalScrollIndicator={false}>
+              <SimpleDatePicker
+                selectedDate={rescheduleDate ? new Date(rescheduleDate) : new Date()}
+                onSelectDate={(date) => {
+                  setRescheduleDate(date.toISOString());
+                  Haptics.selectionAsync();
+                }}
+                minDate={(() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })()}
+                maxDate={(() => { const d = new Date(); d.setFullYear(d.getFullYear() + 2); return d; })()}
+              />
+            </ScrollView>
+            {rescheduleDate ? (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 16, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Pressable
+                  style={{ backgroundColor: catColor, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}
+                  onPress={handleRescheduleConfirm}
+                >
+                  <Text style={{ color: theme.background, fontSize: 16, fontWeight: '700' }}>Reschedule for {formatShortMonthYear(rescheduleDate)}</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Floating Buttons */}
       <View style={[styles.floatingContainer, { bottom: insets.bottom + 16 }]}>
-        {manif && manif.status !== 'spilled' ? (
-          <Pressable style={styles.manifestButton} onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: ritual.id } })}>
-            <MaterialIcons name="star" size={18} color={theme.background} />
-            <Text style={styles.manifestButtonText}>Log a Sign</Text>
-          </Pressable>
-        ) : null}
-        <Pressable
-          style={styles.reflectBtn}
-          onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id, mode: 'reflect' } })}
-        >
-          <MaterialIcons name="edit-note" size={20} color={theme.textPrimary} />
-          <Text style={styles.reflectBtnText}>Reflect</Text>
-        </Pressable>
-        {computedStatus === 'completed' ? (
-          <Pressable style={[styles.completeRitualBtn, { backgroundColor: catColor }]} onPress={handleReschedule}>
-            <MaterialIcons name="replay" size={20} color={theme.background} />
-            <Text style={styles.completeRitualBtnText}>Reschedule</Text>
-          </Pressable>
+        {/* Single-instance rituals (as_needed): different logic */}
+        {ritual.schedule === 'as_needed' ? (
+          <>
+            {computedStatus === 'completed' ? (
+              <>
+                {manif ? (
+                  <Pressable style={styles.manifestButton} onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: ritual.id } })}>
+                    <Text style={styles.manifestButtonText}>Manifest</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={styles.reflectBtn}
+                  onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id, mode: 'reflect' } })}
+                >
+                  <Text style={styles.reflectBtnText}>Reflect</Text>
+                </Pressable>
+                <Pressable style={[styles.completeRitualBtn, { backgroundColor: catColor }]} onPress={handleReschedule}>
+                  <Text style={styles.completeRitualBtnText}>Reschedule</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable style={[styles.completeRitualBtn, { flex: 1 }]} onPress={() => {
+                router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id, returnTo: '/(tabs)/rituals' } });
+              }}>
+                <Text style={styles.completeRitualBtnText}>Log Complete</Text>
+              </Pressable>
+            )}
+          </>
         ) : (
-          <Pressable style={styles.completeRitualBtn} onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id } })}>
-            <MaterialIcons name="check-circle" size={20} color={theme.background} />
-            <Text style={styles.completeRitualBtnText}>Complete</Text>
-          </Pressable>
+          <>
+            {/* Multi-day rituals: current behavior */}
+            {manif ? (
+              <Pressable style={styles.manifestButton} onPress={() => router.push({ pathname: '/add-manifestation', params: { ritualId: ritual.id } })}>
+                <Text style={styles.manifestButtonText}>Manifest</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={styles.reflectBtn}
+              onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id, mode: 'reflect' } })}
+            >
+              <Text style={styles.reflectBtnText}>Reflect</Text>
+            </Pressable>
+            {computedStatus === 'completed' ? (
+              <Pressable style={[styles.completeRitualBtn, { backgroundColor: catColor }]} onPress={handleReschedule}>
+                <Text style={styles.completeRitualBtnText}>Reschedule</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.completeRitualBtn} onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id } })}>
+                <Text style={styles.completeRitualBtnText}>Log</Text>
+              </Pressable>
+            )}
+          </>
         )}
       </View>
+
+      {/* Loading overlay */}
+      {isSaving && (
+        <Modal transparent={true} visible={isSaving} animationType="none">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: theme.backgroundSecondary, borderRadius: theme.radius.lg, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+              <LoadingSpinner size={52} color={theme.primary} />
+              <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '600', color: theme.textPrimary }}>Saving...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
       </SafeAreaView>
     </View>
   );
@@ -688,6 +1044,9 @@ const styles = StyleSheet.create({
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
   tag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, backgroundColor: theme.surfaceLight },
   tagText: { fontSize: 12, fontWeight: '600', color: theme.textSecondary },
+
+  imageSection: { alignItems: 'center', marginBottom: 20, marginHorizontal: 16 },
+  imageSectionLabel: { fontSize: 10, fontWeight: '700', color: theme.textMuted, letterSpacing: 1, marginBottom: 12, textAlign: 'center' },
 
   statusBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -721,9 +1080,10 @@ const styles = StyleSheet.create({
   outcomeManifText: { fontSize: 12, fontWeight: '600' },
   outcomeManifAction: { marginLeft: 'auto', fontSize: 12, fontWeight: '600', color: theme.primary },
 
-  section: { marginBottom: 20 },
+  section: { marginBottom: 20, marginHorizontal: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 10 },
   descriptionText: { fontSize: 15, color: theme.textSecondary, lineHeight: 22 },
+  referenceImagesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   intentionCard: { flexDirection: 'row', gap: 12, backgroundColor: theme.primary + '10', borderRadius: theme.radius.md, padding: 16, marginBottom: 20, borderLeftWidth: 3, borderLeftColor: theme.primary },
   intentionLabel: { fontSize: 10, fontWeight: '700', color: theme.primary, letterSpacing: 1, marginBottom: 4 },
   intentionText: { fontSize: 14, color: theme.textPrimary, lineHeight: 20, fontStyle: 'italic', fontFamily: theme.fonts.serif },
@@ -742,6 +1102,10 @@ const styles = StyleSheet.create({
   editCatRow: { gap: 8, paddingVertical: 4 },
   editCatChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border },
   editCatChipText: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
+  editCatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  editCatCounter: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+  editCatIconWrapper: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  editCatCheck: { position: 'absolute', bottom: -4, right: -4, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 
   manifHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   manifStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
@@ -768,6 +1132,7 @@ const styles = StyleSheet.create({
   journalEntryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   journalDate: { fontSize: 13, fontWeight: '600', color: theme.textSecondary },
   journalCosmic: { fontSize: 11, color: theme.textMuted, marginTop: 3, fontStyle: 'italic' },
+  moodBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
   moodBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8 },
   moodText: { fontSize: 11, fontWeight: '600' },
   journalNotes: { fontSize: 14, color: theme.textPrimary, lineHeight: 20, fontFamily: theme.fonts.serif, marginTop: 8 },
@@ -779,12 +1144,12 @@ const styles = StyleSheet.create({
   manifestButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: theme.success, paddingVertical: 16, borderRadius: theme.radius.lg, ...theme.shadows.elevated },
   manifestButtonText: { fontSize: 14, fontWeight: '700', color: theme.background },
   reflectBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: theme.surface, paddingVertical: 16, paddingHorizontal: 16,
-    borderRadius: theme.radius.lg, borderWidth: 1.5, borderColor: theme.border,
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: theme.primary + '12', paddingVertical: 16,
+    borderRadius: theme.radius.lg, borderWidth: 1.5, borderColor: theme.primary + '30',
     ...theme.shadows.elevated,
   },
-  reflectBtnText: { fontSize: 14, fontWeight: '700', color: theme.textPrimary },
+  reflectBtnText: { fontSize: 14, fontWeight: '700', color: theme.primary },
   completeRitualBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: theme.primary, paddingVertical: 16, borderRadius: theme.radius.lg,

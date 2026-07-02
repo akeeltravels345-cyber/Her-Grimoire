@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,15 +8,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
 import { useAlert } from '@/template';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { resolveCategoryColor } from '../../utils/categoryHelpers';
 import StarField from '../../components/StarField';
+import ImageDisplay from '../../components/ImageDisplay';
+import { formatFullDateWithDay } from '../../utils/dateHelpers';
 
 const MOOD_COLORS: Record<string, string> = {
-  Connected: '#6667AB', Empowered: '#7B337E', Peaceful: '#5EBD8A',
-  Grateful: '#C9A84C', Reflective: '#4EA8DE', Contemplative: '#8B5CF6',
-  Hopeful: '#5EBDAA', Grounded: '#5EBD8A', Centered: '#6667AB',
-  Elevated: '#C9847A', Determined: '#E85D6F', Mystified: '#7C5CBF',
-  Aware: '#4EA8DE', Radiant: '#C9A84C', Joyful: '#F59E0B',
+  Empowered: '#7B337E', Aligned: '#5EBDAA', Renewed: '#6667AB',
+  Elevated: '#C9847A', Balanced: '#5EBD8A', Connected: '#6667AB',
+  Transformed: '#8B5CF6', Inspired: '#C9A84C', Grounded: '#5EBD8A',
+  Amazed: '#F59E0B', Peaceful: '#5EBD8A',
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -38,6 +40,7 @@ export default function JournalEntryDetailScreen() {
   const [editMood, setEditMood] = useState('');
   const [editTitle, setEditTitle] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Resolve entry — ritual or standalone
   const ritual = ritualId ? rituals.find(r => r.id === ritualId) : undefined;
@@ -66,9 +69,7 @@ export default function JournalEntryDetailScreen() {
 
   const moodColor = MOOD_COLORS[entry.mood || ''] || theme.accent;
 
-  const formattedDate = new Date(entry.date).toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-  });
+  const formattedDate = formatFullDateWithDay(entry.date);
 
   const startEditing = () => {
     setEditNotes(entry.notes);
@@ -80,22 +81,27 @@ export default function JournalEntryDetailScreen() {
     setIsEditing(true);
   };
 
-  const saveEdits = () => {
-    if (isRitual && ritualId) {
-      updateJournalEntry(ritualId, id, {
-        notes: editNotes.trim(),
-        mood: editMood || entry.mood,
-      });
-    } else if (standaloneEntry) {
-      updateStandaloneEntry(standaloneEntry.id, {
-        title: editTitle.trim() || standaloneEntry.title,
-        notes: editNotes.trim(),
-        mood: editMood || undefined,
-        tags: editTags.trim() ? editTags.split(',').map(t => t.trim()).filter(Boolean) : [],
-      });
+  const saveEdits = async () => {
+    setIsSaving(true);
+    try {
+      if (isRitual && ritualId) {
+        updateJournalEntry(ritualId, id, {
+          notes: editNotes.trim(),
+          mood: editMood || entry.mood,
+        });
+      } else if (standaloneEntry) {
+        updateStandaloneEntry(standaloneEntry.id, {
+          title: editTitle.trim() || standaloneEntry.title,
+          notes: editNotes.trim(),
+          mood: editMood || undefined,
+          tags: editTags.trim() ? editTags.split(',').map(t => t.trim()).filter(Boolean) : [],
+        });
+      }
+      setIsEditing(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } finally {
+      setIsSaving(false);
     }
-    setIsEditing(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleDelete = () => {
@@ -258,6 +264,14 @@ export default function JournalEntryDetailScreen() {
           <Text style={styles.notesText}>{entry.notes || 'No notes recorded.'}</Text>
         )}
 
+        {/* Ritual Photo */}
+        {'imageUrl' in entry && entry.imageUrl ? (
+          <View style={styles.imageSection}>
+            <Text style={styles.imageLabel}>RITUAL PHOTO</Text>
+            <ImageDisplay imageUri={(entry as any).imageUrl} size={240} />
+          </View>
+        ) : null}
+
         {/* Tags (standalone) */}
         {!isRitual && (
           isEditing ? (
@@ -282,6 +296,18 @@ export default function JournalEntryDetailScreen() {
           ) : null
         )}
       </ScrollView>
+
+      {/* Loading overlay */}
+      {isSaving && (
+        <Modal transparent={true} visible={isSaving} animationType="none">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: theme.backgroundSecondary, borderRadius: theme.radius.lg, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+              <LoadingSpinner size={52} color={theme.primary} />
+              <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '600', color: theme.textPrimary }}>Saving...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -362,4 +388,7 @@ const styles = StyleSheet.create({
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 24 },
   tagChip: { backgroundColor: theme.surfaceLight, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   tagText: { fontSize: 12, color: theme.accent, fontWeight: '500' },
+
+  imageSection: { alignItems: 'center', marginTop: 24, marginBottom: 24 },
+  imageLabel: { fontSize: 10, fontWeight: '700', color: theme.textMuted, letterSpacing: 1, marginBottom: 12, textTransform: 'uppercase' as const },
 });

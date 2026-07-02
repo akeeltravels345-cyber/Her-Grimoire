@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet, Platform,
   KeyboardAvoidingView, ScrollView,
@@ -12,6 +12,7 @@ import { theme } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
 import StarField from '../components/StarField';
 import { resolveCategoryColor } from '../utils/categoryHelpers';
+import { formatShortDate, formatWeekdayShort, formatMonthShort } from '../utils/dateHelpers';
 
 const MONTH_NAMES = [
   'January','February','March','April','May','June',
@@ -43,6 +44,7 @@ type QuickRitual = {
   category: string;
   schedule: 'daily' | 'weekly' | 'monthly' | 'as_needed';
   scheduledDate: Date | null;
+  consecutiveDays?: number;
 };
 
 type Step = 1 | 2 | 3 | 4;
@@ -51,20 +53,24 @@ const TOTAL_STEPS = 4;
 export default function MonthlyIntentionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { setMonthlyIntention, addRitual, categories, categoryColors } = useApp();
+  const { setIntentionForMonth, getIntentionForMonth, viewingMonth, goToMonth, addRitual, categories, categoryColors } = useApp();
 
-  const now = new Date();
-  const monthLabel = `${MONTH_NAMES[now.getMonth()]} ${now.getFullYear()}`;
-  const nextMonthLabel = `${MONTH_NAMES[(now.getMonth() + 1) % 12]} ${now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear()}`;
+  // Parse viewing month into year and month index
+  const [year, monthNum] = viewingMonth.split('-');
+  const monthIndex = parseInt(monthNum) - 1;
+  const monthLabel = `${MONTH_NAMES[monthIndex]} ${year}`;
+
+  // Load existing intention for this month
+  const existingIntention = getIntentionForMonth(viewingMonth);
 
   const [step, setStep] = useState<Step>(1);
 
   // Step 1 — Call in
-  const [callIn, setCallIn] = useState('');
+  const [callIn, setCallIn] = useState(existingIntention.intention);
   // Step 2 — Release
-  const [release, setRelease] = useState('');
+  const [release, setRelease] = useState(existingIntention.release);
   // Step 3 — Anchor (rituals intention)
-  const [anchor, setAnchor] = useState('');
+  const [anchor, setAnchor] = useState(existingIntention.ritualIntention);
   // Step 4 — Quick schedule
   const [queuedRituals, setQueuedRituals] = useState<QuickRitual[]>([]);
   const [addingRitual, setAddingRitual] = useState(false);
@@ -72,6 +78,19 @@ export default function MonthlyIntentionScreen() {
   const [quickCategory, setQuickCategory] = useState(categories[0]?.id || '');
   const [quickSchedule, setQuickSchedule] = useState<'daily' | 'weekly' | 'monthly' | 'as_needed'>('as_needed');
   const [quickDate, setQuickDate] = useState<Date | null>(null);
+  const [quickConsecutive, setQuickConsecutive] = useState(1);
+
+  const todayDateString = useMemo(() => new Date().toDateString(), []);
+
+  // Update form when viewing month changes
+  useEffect(() => {
+    const intention = getIntentionForMonth(viewingMonth);
+    setCallIn(intention.intention);
+    setRelease(intention.release);
+    setAnchor(intention.ritualIntention);
+    setStep(1);  // Reset to first step
+    setQueuedRituals([]);  // Clear queued rituals when switching months
+  }, [viewingMonth]);
 
   const canGoNext: Record<Step, boolean> = {
     1: callIn.trim().length > 0,
@@ -80,7 +99,11 @@ export default function MonthlyIntentionScreen() {
     4: true, // step 4 is always skippable
   };
 
-  const canAddQuick = quickName.trim().length > 0 && (quickSchedule === 'as_needed' || quickDate !== null);
+  const canAddQuick = quickName.trim().length > 0 && (
+    quickSchedule === 'as_needed'
+      ? (quickConsecutive <= 1 || quickDate !== null)
+      : quickDate !== null
+  );
 
   const goNext = () => {
     if (step < TOTAL_STEPS) {
@@ -99,6 +122,7 @@ export default function MonthlyIntentionScreen() {
     setQuickCategory(categories[0]?.id || '');
     setQuickSchedule('as_needed');
     setQuickDate(null);
+    setQuickConsecutive(1);
   };
 
   const handleAddQuick = () => {
@@ -109,6 +133,7 @@ export default function MonthlyIntentionScreen() {
       category: quickCategory,
       schedule: quickSchedule,
       scheduledDate: quickDate,
+      consecutiveDays: quickSchedule === 'as_needed' && quickConsecutive > 1 ? quickConsecutive : undefined,
     }]);
     resetQuickForm();
     setAddingRitual(false);
@@ -121,8 +146,8 @@ export default function MonthlyIntentionScreen() {
   };
 
   const handleFinish = () => {
-    // Save intention
-    setMonthlyIntention(callIn.trim(), release.trim(), anchor.trim());
+    // Save intention for the viewing month
+    setIntentionForMonth(viewingMonth, callIn.trim(), release.trim(), anchor.trim());
 
     // Schedule queued rituals
     queuedRituals.forEach(r => {
@@ -135,6 +160,7 @@ export default function MonthlyIntentionScreen() {
         scheduledDate: r.scheduledDate?.toISOString(),
         intention: callIn.trim(),
         status: 'scheduled',
+        consecutiveDays: r.consecutiveDays,
       });
     });
 
@@ -207,13 +233,22 @@ export default function MonthlyIntentionScreen() {
             </View>
             <Text style={styles.stepLabel}>{stepTitles[step]} · Step {step} of {TOTAL_STEPS}</Text>
 
+            {/* Month navigation */}
+            <View style={styles.monthNav}>
+              <Pressable onPress={() => goToMonth(-1)} hitSlop={12}>
+                <MaterialIcons name="chevron-left" size={24} color={theme.primary} />
+              </Pressable>
+              <Text style={styles.monthNavLabel}>{monthLabel}</Text>
+              <Pressable onPress={() => goToMonth(1)} hitSlop={12}>
+                <MaterialIcons name="chevron-right" size={24} color={theme.primary} />
+              </Pressable>
+            </View>
+
             {/* Month header */}
             <Text style={styles.monthTitle}>{monthLabel}</Text>
-            <Text style={styles.subtitle}>A new chapter begins ✦</Text>
+            <Text style={styles.subtitle}>A new chapter begins</Text>
 
             <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerStar}>✦</Text>
               <View style={styles.dividerLine} />
             </View>
 
@@ -320,7 +355,7 @@ export default function MonthlyIntentionScreen() {
                         <Text style={styles.queuedName}>{r.name}</Text>
                         <Text style={styles.queuedMeta}>
                           {cat?.name} · {r.schedule === 'as_needed' ? 'One Time' : r.schedule.charAt(0).toUpperCase() + r.schedule.slice(1)}
-                          {r.scheduledDate ? ` · ${r.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                          {r.scheduledDate ? ` · ${formatShortDate(r.scheduledDate)}` : ''}
                         </Text>
                       </View>
                       <Pressable onPress={() => removeQueued(r.tempId)} hitSlop={10}>
@@ -387,14 +422,72 @@ export default function MonthlyIntentionScreen() {
                       ))}
                     </View>
 
+                    {quickSchedule === 'as_needed' && (
+                      <>
+                        <Text style={styles.quickAddLabel}>CONSECUTIVE DAYS</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                          <Pressable
+                            onPress={() => setQuickConsecutive(d => Math.max(1, d - 1))}
+                            hitSlop={10}
+                            style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surface }}
+                          >
+                            <MaterialIcons name="remove" size={18} color={quickConsecutive <= 1 ? theme.textMuted : theme.textPrimary} />
+                          </Pressable>
+                          <Text style={{ fontSize: 20, fontWeight: '700', color: theme.textPrimary, minWidth: 32, textAlign: 'center' }}>{quickConsecutive}</Text>
+                          <Pressable
+                            onPress={() => setQuickConsecutive(d => Math.min(30, d + 1))}
+                            hitSlop={10}
+                            style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surface }}
+                          >
+                            <MaterialIcons name="add" size={18} color={theme.textPrimary} />
+                          </Pressable>
+                          <Text style={{ fontSize: 13, color: theme.textMuted, flex: 1 }}>
+                            {quickConsecutive === 1 ? 'Single cast' : `${quickConsecutive}-day sequence`}
+                          </Text>
+                        </View>
+                        {quickConsecutive > 1 && (
+                          <>
+                            <Text style={styles.quickAddLabel}>START DATE</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+                              <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
+                                {DATE_OPTIONS.map((d, i) => {
+                                  const dateStr = d.toDateString();
+                                  const isSelected = quickDate?.toDateString() === dateStr;
+                                  const isToday = dateStr === todayDateString;
+                                  return (
+                                    <Pressable
+                                      key={i}
+                                      style={[styles.datePill, isSelected && styles.datePillActive]}
+                                      onPress={() => { setQuickDate(d); Haptics.selectionAsync(); }}
+                                    >
+                                      <Text style={[styles.datePillDay, isSelected && styles.datePillTextActive]}>
+                                        {isToday ? 'Today' : formatWeekdayShort(d)}
+                                      </Text>
+                                      <Text style={[styles.datePillNum, isSelected && styles.datePillTextActive]}>
+                                        {d.getDate()}
+                                      </Text>
+                                      <Text style={[styles.datePillMonth, isSelected && styles.datePillTextActive]}>
+                                        {formatMonthShort(d)}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            </ScrollView>
+                          </>
+                        )}
+                      </>
+                    )}
+
                     {quickSchedule !== 'as_needed' && (
                       <>
                         <Text style={styles.quickAddLabel}>START DATE</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
                           <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
                             {DATE_OPTIONS.map((d, i) => {
-                              const isSelected = quickDate?.toDateString() === d.toDateString();
-                              const isToday = d.toDateString() === new Date().toDateString();
+                              const dateStr = d.toDateString();
+                              const isSelected = quickDate?.toDateString() === dateStr;
+                              const isToday = dateStr === todayDateString;
                               return (
                                 <Pressable
                                   key={i}
@@ -402,13 +495,13 @@ export default function MonthlyIntentionScreen() {
                                   onPress={() => { setQuickDate(d); Haptics.selectionAsync(); }}
                                 >
                                   <Text style={[styles.datePillDay, isSelected && styles.datePillTextActive]}>
-                                    {isToday ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' })}
+                                    {isToday ? 'Today' : formatWeekdayShort(d)}
                                   </Text>
                                   <Text style={[styles.datePillNum, isSelected && styles.datePillTextActive]}>
                                     {d.getDate()}
                                   </Text>
                                   <Text style={[styles.datePillMonth, isSelected && styles.datePillTextActive]}>
-                                    {d.toLocaleDateString('en-US', { month: 'short' })}
+                                    {formatMonthShort(d)}
                                   </Text>
                                 </Pressable>
                               );
@@ -447,7 +540,7 @@ export default function MonthlyIntentionScreen() {
 
                 {queuedRituals.length > 0 && (
                   <Text style={styles.scheduledHint}>
-                    ✦ {queuedRituals.length} ritual{queuedRituals.length !== 1 ? 's' : ''} ready to schedule
+                    {queuedRituals.length} ritual{queuedRituals.length !== 1 ? 's' : ''} ready to schedule
                   </Text>
                 )}
 
@@ -459,7 +552,7 @@ export default function MonthlyIntentionScreen() {
                     end={{ x: 1, y: 1 }}
                   >
                     <Text style={styles.finishBtnText}>
-                      {queuedRituals.length > 0 ? `Begin ${monthLabel} ✦` : `Begin ${monthLabel} (no rituals) →`}
+                      {queuedRituals.length > 0 ? `Begin ${monthLabel}` : `Begin ${monthLabel} (no rituals) →`}
                     </Text>
                   </LinearGradient>
                 </Pressable>
@@ -478,6 +571,9 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, marginBottom: 8 },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+
+  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 16 },
+  monthNavLabel: { fontSize: 13, fontWeight: '600', color: theme.textSecondary, textAlign: 'center', minWidth: 120 },
 
   progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   progressDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1.5, borderColor: 'rgba(201,160,220,0.3)', alignItems: 'center', justifyContent: 'center' },

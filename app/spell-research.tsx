@@ -37,18 +37,30 @@ export default function SpellResearchScreen() {
 
   // Load from AsyncStorage
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then(raw => {
-      if (raw) {
-        try { setItems(JSON.parse(raw)); } catch {}
-      }
-      setIsLoaded(true);
-    });
+    AsyncStorage.getItem(STORAGE_KEY)
+      .then(raw => {
+        if (raw) {
+          try {
+            setItems(JSON.parse(raw));
+          } catch (error) {
+            console.warn('[spell-research] Failed to parse items:', error);
+          }
+        }
+        setIsLoaded(true);
+      })
+      .catch(error => {
+        console.error('[spell-research] Error loading items from storage:', error);
+        setIsLoaded(true); // Still mark as loaded even on error
+      });
   }, []);
 
   // Persist on change
   useEffect(() => {
     if (isLoaded) {
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+        .catch(error => {
+          console.error('[spell-research] Error saving items to storage:', error);
+        });
     }
   }, [items, isLoaded]);
 

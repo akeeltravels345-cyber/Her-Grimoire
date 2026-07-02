@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Grimoire Web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web"],
+      "port": 19006
+    }
+  ]
+}

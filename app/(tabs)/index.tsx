@@ -3,19 +3,20 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme, getCurrentMoonPhase } from '../../constants/theme';
 import { getTodayPlanet } from '../../constants/planetaryData';
 import { getCurrentPlanetaryHour, formatHourTime, PlanetaryHourInfo } from '../../services/planetaryHours';
 import { useApp } from '../../contexts/AppContext';
 import { getComputedStatus, getDaysUntil } from '../../services/mockData';
+import { formatMonthLong, formatDateWithLongDay, formatShortDate } from '../../utils/dateHelpers';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good Morning ✦';
-  if (hour < 17) return 'Good Afternoon ✦';
-  return 'Good Evening ✦';
+  if (hour < 12) return 'Good Morning';
+  if (hour < 17) return 'Good Afternoon';
+  return 'Good Evening';
 }
 
 import StarField from '../../components/StarField';
@@ -39,7 +40,7 @@ function getMoonPhaseIndex(): number {
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { rituals, categories, categoryColors, manifestations, updateRitual, currentMonthIntention, coreCategories, monthlyStreak, standaloneEntries } = useApp();
+  const { rituals, categories, categoryColors, manifestations, updateRitual, currentMonthIntention, coreCategories, monthlyStreak, standaloneEntries, monthlySnapshots } = useApp();
   const moonPhase = getCurrentMoonPhase();
   const moonPhaseIndex = getMoonPhaseIndex();
   const todayPlanet = getTodayPlanet();
@@ -55,6 +56,14 @@ export default function DashboardScreen() {
     const interval = setInterval(update, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Force re-render when screen regains focus to show updated ritual statuses
+  const [, setRefreshTrigger] = useState(0);
+  useFocusEffect(
+    React.useCallback(() => {
+      setRefreshTrigger(t => t + 1); // Trigger re-render
+    }, [])
+  );
 
   // ── Monthly cycle banners ──
   const now_mc = new Date();
@@ -78,11 +87,14 @@ export default function DashboardScreen() {
   // Days 27–end: chapter-closing banner
   const showReviewBanner = useMemo(() => {
     if (reviewBannerDismissed) return false;
+    // Don't show if month-review is already complete (reflection exists)
+    const monthSnapshot = monthlySnapshots.find(s => s.month === currentMonthStr_mc);
+    if (monthSnapshot && monthSnapshot.reflection) return false;
     return dayOfMonth_mc >= daysInMonth_mc - 3;
-  }, [reviewBannerDismissed, dayOfMonth_mc, daysInMonth_mc]);
+  }, [reviewBannerDismissed, dayOfMonth_mc, daysInMonth_mc, monthlySnapshots, currentMonthStr_mc]);
 
   const intentionMonthName = useMemo(() => {
-    return new Date().toLocaleDateString('en-US', { month: 'long' });
+    return formatMonthLong(new Date());
   }, []);
 
   const overdueRituals = useMemo(() => {
@@ -106,7 +118,7 @@ export default function DashboardScreen() {
     const daysRemaining = daysInMonth - dayOfMonth;
     const monthStart = new Date(year, month, 1);
     const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
-    const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+    const monthName = formatMonthLong(now);
 
     const monthRituals = rituals.filter(r => {
       if (!r.scheduledDate) return false;
@@ -192,13 +204,79 @@ export default function DashboardScreen() {
     return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 4);
   }, [rituals, standaloneEntries]);
 
-  const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const todayStr = formatDateWithLongDay(new Date());
   const greeting = getGreeting();
 
   function getOverduePill(days: number): string {
     if (days === -1) return '1d overdue';
     return `${Math.abs(days)}d overdue`;
   }
+
+  // Memoized overdue ritual item component
+  const OverdueRitualItem = React.memo(({ ritual }: { ritual: any }) => {
+    const cat = resolveCategory(ritual.category, categories);
+    const catColor = resolveCategoryColor(ritual.category, categoryColors, categories);
+    const days = ritual.scheduledDate ? getDaysUntil(ritual.scheduledDate) : null;
+
+    return (
+      <SwipeableRow key={ritual.id} onDelete={() => updateRitual(ritual.id, { status: 'dismissed' as any, scheduledDate: undefined })}>
+        <Pressable
+          style={styles.alertBanner}
+          onPress={() => router.push(`/ritual/${ritual.id}`)}
+        >
+          <View style={[styles.alertIcon, { backgroundColor: catColor + '20' }]}>
+            <MaterialIcons
+              name={(cat?.icon || 'auto-fix-high') as keyof typeof MaterialIcons.glyphMap}
+              size={18}
+              color={catColor}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alertName} numberOfLines={1}>{ritual.name}</Text>
+            {ritual.intention ? <Text style={styles.alertIntention} numberOfLines={1}>{ritual.intention}</Text> : null}
+          </View>
+          {days !== null ? (
+            <View style={styles.alertDatePill}>
+              <Text style={styles.alertDateText}>{getOverduePill(days)}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </SwipeableRow>
+    );
+  });
+
+  OverdueRitualItem.displayName = 'OverdueRitualItem';
+
+  // Memoized today ritual item component
+  const TodayRitualItem = React.memo(({ ritual }: { ritual: any }) => {
+    const cat = resolveCategory(ritual.category, categories);
+    const catColor = resolveCategoryColor(ritual.category, categoryColors, categories);
+
+    return (
+      <Pressable key={ritual.id} style={styles.todayCard} onPress={() => router.push(`/ritual/${ritual.id}`)}>
+        <View style={[styles.todayCatBar, { backgroundColor: catColor }]} />
+        <View style={[styles.todayIcon, { backgroundColor: catColor + '22' }]}>
+          <MaterialIcons name={(cat?.icon || 'auto-fix-high') as keyof typeof MaterialIcons.glyphMap} size={18} color={catColor} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.todayName} numberOfLines={1}>{ritual.name}</Text>
+          {ritual.intention ? (
+            <Text style={styles.todayIntention} numberOfLines={1}>{ritual.intention}</Text>
+          ) : null}
+        </View>
+        <Pressable
+          style={[styles.todayCompleteBtn, { borderColor: catColor + '60' }]}
+          onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: ritual.id } } as any)}
+          hitSlop={6}
+        >
+          <MaterialIcons name="check" size={15} color={catColor} />
+          <Text style={[styles.todayCompleteBtnText, { color: catColor }]}>Complete</Text>
+        </Pressable>
+      </Pressable>
+    );
+  });
+
+  TodayRitualItem.displayName = 'TodayRitualItem';
 
   return (
     <LinearGradient
@@ -249,18 +327,18 @@ locations={[0, 0.35, 0.65, 1]}
             </View>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable onPress={() => router.push('/write-journal' as any)} style={styles.profileButton}>
-                <MaterialIcons name="edit-note" size={22} color={theme.textSecondary} />
+                <MaterialIcons name="edit-note" size={18} color={theme.textSecondary} />
               </Pressable>
               <Pressable onPress={() => router.push('/add-ritual')} style={styles.addButton}>
                 <LinearGradient
                   colors={[theme.primary, theme.primaryDark]}
                   style={styles.addButtonGradient}
                 >
-                  <MaterialIcons name="add" size={24} color={theme.background} />
+                  <MaterialIcons name="add" size={20} color={theme.background} />
                 </LinearGradient>
               </Pressable>
               <Pressable onPress={() => router.push('/profile')} style={styles.profileButton}>
-                <MaterialIcons name="person" size={22} color={theme.textSecondary} />
+                <MaterialIcons name="person" size={18} color={theme.textSecondary} />
               </Pressable>
             </View>
           </View>
@@ -277,14 +355,6 @@ locations={[0, 0.35, 0.65, 1]}
                 end={{ x: 1, y: 1 }}
                 style={StyleSheet.absoluteFill}
               />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.newMonthEyebrow}>A NEW CHAPTER BEGINS</Text>
-                <Text style={styles.newMonthTitle}>Welcome to {intentionMonthName} ✦</Text>
-                <Text style={styles.newMonthSub}>Set your intention and plan your month</Text>
-              </View>
-              <View style={styles.newMonthArrow}>
-                <MaterialIcons name="arrow-forward" size={20} color={theme.primary} />
-              </View>
               <Pressable
                 style={styles.newMonthClose}
                 onPress={(e) => { e.stopPropagation?.(); setNewMonthCardDismissed(true); }}
@@ -292,6 +362,14 @@ locations={[0, 0.35, 0.65, 1]}
               >
                 <MaterialIcons name="close" size={14} color={theme.textMuted} />
               </Pressable>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.newMonthEyebrow}>A NEW CHAPTER BEGINS</Text>
+                <Text style={styles.newMonthTitle}>Welcome to {intentionMonthName}</Text>
+                <Text style={styles.newMonthSub}>Set your intention and plan your month</Text>
+              </View>
+              <View style={styles.newMonthArrow}>
+                <MaterialIcons name="arrow-forward" size={20} color={theme.primary} />
+              </View>
             </Pressable>
           ) : null}
 
@@ -303,7 +381,7 @@ locations={[0, 0.35, 0.65, 1]}
             >
               <Text style={styles.reviewBannerIcon}>🌘</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.reviewBannerTitle}>Your chapter is closing</Text>
+                <Text style={styles.reviewBannerTitle}>This chapter is closing</Text>
                 <Text style={styles.reviewBannerSub}>Reflect on {intentionMonthName} before it passes →</Text>
               </View>
               <Pressable
@@ -391,36 +469,7 @@ locations={[0, 0.35, 0.65, 1]}
                 <MaterialIcons name="error-outline" size={16} color={theme.error} />
                 <Text style={styles.alertsTitle}>{overdueRituals.length} Past Due</Text>
               </View>
-              {overdueRituals.map(r => {
-                const cat = resolveCategory(r.category, categories);
-                const catColor = resolveCategoryColor(r.category, categoryColors, categories);
-                const days = r.scheduledDate ? getDaysUntil(r.scheduledDate) : null;
-                return (
-                  <SwipeableRow key={r.id} onDelete={() => updateRitual(r.id, { status: 'dismissed' as any, scheduledDate: undefined })}>
-                    <Pressable
-                      style={styles.alertBanner}
-                      onPress={() => router.push(`/ritual/${r.id}`)}
-                    >
-                      <View style={[styles.alertIcon, { backgroundColor: catColor + '20' }]}>
-                        <MaterialIcons
-                          name={(cat?.icon || 'auto-fix-high') as keyof typeof MaterialIcons.glyphMap}
-                          size={18}
-                          color={catColor}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.alertName} numberOfLines={1}>{r.name}</Text>
-                        {r.intention ? <Text style={styles.alertIntention} numberOfLines={1}>{r.intention}</Text> : null}
-                      </View>
-                      {days !== null ? (
-                        <View style={styles.alertDatePill}>
-                          <Text style={styles.alertDateText}>{getOverduePill(days)}</Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  </SwipeableRow>
-                );
-              })}
+              {overdueRituals.map(r => <OverdueRitualItem key={r.id} ritual={r} />)}
             </View>
           ) : null}
 
@@ -435,32 +484,7 @@ locations={[0, 0.35, 0.65, 1]}
                   </View>
                 </View>
               </View>
-              {todayRituals.map(r => {
-                const cat = resolveCategory(r.category, categories);
-                const catColor = resolveCategoryColor(r.category, categoryColors, categories);
-                return (
-                  <Pressable key={r.id} style={styles.todayCard} onPress={() => router.push(`/ritual/${r.id}`)}>
-                    <View style={[styles.todayCatBar, { backgroundColor: catColor }]} />
-                    <View style={[styles.todayIcon, { backgroundColor: catColor + '22' }]}>
-                      <MaterialIcons name={(cat?.icon || 'auto-fix-high') as keyof typeof MaterialIcons.glyphMap} size={18} color={catColor} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.todayName} numberOfLines={1}>{r.name}</Text>
-                      {r.intention ? (
-                        <Text style={styles.todayIntention} numberOfLines={1}>{r.intention}</Text>
-                      ) : null}
-                    </View>
-                    <Pressable
-                      style={[styles.todayCompleteBtn, { borderColor: catColor + '60' }]}
-                      onPress={() => router.push({ pathname: '/log-ritual', params: { ritualId: r.id } } as any)}
-                      hitSlop={6}
-                    >
-                      <MaterialIcons name="check" size={15} color={catColor} />
-                      <Text style={[styles.todayCompleteBtnText, { color: catColor }]}>Complete</Text>
-                    </Pressable>
-                  </Pressable>
-                );
-              })}
+              {todayRituals.map(r => <TodayRitualItem key={r.id} ritual={r} />)}
             </View>
           ) : null}
 
@@ -506,7 +530,7 @@ locations={[0, 0.35, 0.65, 1]}
                       <Text style={styles.activityNotes} numberOfLines={2}>{entry.notes}</Text>
                       <View style={styles.activityMeta}>
                         <Text style={styles.activityDate}>
-                          {new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {formatShortDate(entry.date)}
                         </Text>
                         {entry.mood ? (
                           <View style={styles.activityMoodBadge}>
@@ -747,20 +771,23 @@ function MonthlySnapshotCard({ data, monthlyStreak, currentMonthIntention }: Mon
 
       {/* ═══ Footer Stats ═══ */}
       <View style={msStyles.footer}>
-        <View style={msStyles.footerItem}>
+        <Pressable
+          style={msStyles.footerItem}
+          onPress={() => router.push('/(tabs)/rituals')}
+          hitSlop={8}
+        >
           <Text style={[msStyles.footerValue, { color: theme.success }]}>{completed}</Text>
           <Text style={msStyles.footerLabel}>Completed</Text>
-        </View>
+        </Pressable>
         <View style={msStyles.footerDivider} />
-        <View style={msStyles.footerItem}>
+        <Pressable
+          style={msStyles.footerItem}
+          onPress={() => router.push('/(tabs)/rituals')}
+          hitSlop={8}
+        >
           <Text style={[msStyles.footerValue, { color: missed > 0 ? theme.error : theme.textMuted }]}>{missed}</Text>
           <Text style={msStyles.footerLabel}>Missed</Text>
-        </View>
-        <View style={msStyles.footerDivider} />
-        <View style={msStyles.footerItem}>
-          <Text style={[msStyles.footerValue, { color: '#4EA8DE' }]}>{manifestedCount}</Text>
-          <Text style={msStyles.footerLabel}>Manifested</Text>
-        </View>
+        </Pressable>
       </View>
     </View>
   );
@@ -877,7 +904,7 @@ const msStyles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
     marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: theme.border,
   },
-  footerItem: { alignItems: 'center' },
+  footerItem: { alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   footerValue: { fontSize: 18, fontWeight: '700' },
 
   footerLabel: {
@@ -900,13 +927,13 @@ const styles = StyleSheet.create({
     textShadowRadius: 20,
   },
   addButton: {
-    width: 44, height: 44, borderRadius: 22, overflow: 'hidden',
+    width: 36, height: 36, borderRadius: 18, overflow: 'hidden',
   },
   addButtonGradient: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
   },
-  profileButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.border },
+  profileButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.border },
 
   // ═══ Cosmic Grid — Square Cards ═══
   cosmicGrid: {
@@ -1032,7 +1059,7 @@ const styles = StyleSheet.create({
   newMonthTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, fontFamily: theme.fonts.serif, marginBottom: 3 },
   newMonthSub: { fontSize: 12, color: theme.textSecondary },
   newMonthArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.primary + '20', alignItems: 'center', justifyContent: 'center' },
-  newMonthClose: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  newMonthClose: { position: 'absolute', top: 8, right: 8, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
 
   // ═══ Review Banner ═══
   reviewBanner: {

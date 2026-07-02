@@ -254,8 +254,6 @@ export default function MonthHistoryScreen() {
           {/* Divider */}
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerGlyph}>✦</Text>
-            <View style={styles.dividerLine} />
           </View>
 
           {/* Snapshot cards */}

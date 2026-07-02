@@ -9,6 +9,7 @@ import { theme } from '../../constants/theme';
 import { useApp } from '../../contexts/AppContext';
 import { getComputedStatus, getDaysUntil, getUniqueRitualCounts, Ritual } from '../../services/mockData';
 import StarField from '../../components/StarField';
+import { formatMonthYear, formatDateWithShortDay, formatDateShortFull } from '../../utils/dateHelpers';
 
 type StatusFilter = 'all' | 'scheduled' | 'approaching' | 'completed' | 'overdue';
 
@@ -198,7 +199,7 @@ export default function TrackerScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }, [updateStatus]);
 
-  const currentMonth = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const currentMonth = formatMonthYear(today);
 
   const renderRitualRow = (ritual: RitualWithComputed, dimmed?: boolean) => {
     const cfg = STATUS_CONFIG[ritual.computedStatus];
@@ -405,7 +406,7 @@ export default function TrackerScreen() {
         <View style={styles.filterBar}>
           <Text style={styles.filterText}>
             {selectedDay
-              ? `${selectedDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+              ? `${formatDateShortFull(selectedDay)}`
               : ''}
             {selectedDay && activeFilter !== 'all' ? ' · ' : ''}
             {activeFilter !== 'all' ? `${activeFilter}` : ''}

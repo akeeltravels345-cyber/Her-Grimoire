@@ -6,14 +6,19 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { theme } from '../constants/theme';
 import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
 import { SignType } from '../services/mockData';
 import GradientScreen from '../components/GradientScreen';
+import ImageField from '../components/ImageField';
+import ImageDisplay from '../components/ImageDisplay';
+import CelebrationModal from '../components/CelebrationModal';
+import { formatShortDate } from '../utils/dateHelpers';
 
 const SIGN_TYPES: { key: SignType; emoji: string; label: string; desc: string; color: string }[] = [
   { key: 'dream',         emoji: '🌙', label: 'Dream',            desc: 'A dream that felt connected',   color: '#6667AB' },
   { key: 'omen',          emoji: '🦅', label: 'Omen',             desc: 'A sign in nature or the world', color: '#C9A0DC' },
   { key: 'encounter',     emoji: '👁️',  label: 'Encounter',        desc: 'A meaningful meeting or event', color: '#4EA8DE' },
-  { key: 'symbol',        emoji: '✦',  label: 'Symbol',           desc: 'A recurring image or motif',    color: '#F5D5E0' },
+  { key: 'symbol',        emoji: '◆',  label: 'Symbol',           desc: 'A recurring image or motif',    color: '#F5D5E0' },
   { key: 'number',        emoji: '🔢', label: 'Repeated Number',  desc: 'Numbers showing up in pattern', color: '#B8B0E8' },
   { key: 'synchronicity', emoji: '✨', label: 'Synchronicity',    desc: 'A meaningful coincidence',      color: '#7ED4A8' },
 ];
@@ -22,32 +27,87 @@ export default function AddManifestationScreen() {
   const { ritualId, mode } = useLocalSearchParams<{ ritualId: string; mode?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { rituals, manifestations, addManifestationResult } = useApp();
+  const { rituals, manifestations, addManifestationResult, unspillManifestation } = useApp();
+  const { showToast } = useToast();
 
   const ritual = rituals.find(r => r.id === ritualId);
-  const manif = manifestations.find(m => m.ritualId === ritualId);
+  // For series/group rituals, look up by series/group manifestation ID; for others, look by ritualId
+  const manif = ritual?.seriesId
+    ? manifestations.find(m => m.id === 'mf_series_' + ritual.seriesId)
+    : ritual?.groupId
+    ? manifestations.find(m => m.id === 'mf_group_' + ritual.groupId)
+    : manifestations.find(m => m.ritualId === ritualId);
 
   const isSpillMode = mode === 'spill';
   const [isSpilling, setIsSpilling] = useState(isSpillMode);
   const [selectedSign, setSelectedSign] = useState<SignType | null>(null);
   const [description, setDescription] = useState('');
+  const [imageUrl, setImageUrl] = useState<string | undefined>(undefined);
+  const [showCelebration, setShowCelebration] = useState(false);
 
   const canSave = description.trim().length > 0 && (isSpilling || selectedSign !== null);
 
   const handleSave = () => {
-    if (!canSave || !ritualId) return;
-    const type = isSpilling ? 'manifested' : 'sign';
-    const signType = isSpilling ? undefined : (selectedSign ?? undefined);
-    addManifestationResult(ritualId, description.trim(), new Date().toISOString(), type, signType);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (!canSave || !ritualId) {
+      // Show specific error messages for what's missing
+      if (!description.trim()) {
+        showToast('Please describe the sign or manifestation', 'error', { duration: 4000 });
+      } else if (!isSpilling && selectedSign === null) {
+        showToast('Please select a type of sign', 'error', { duration: 4000 });
+      }
+      return;
+    }
+
+    try {
+      const type = isSpilling ? 'manifested' : 'sign';
+      const signType = isSpilling ? undefined : (selectedSign ?? undefined);
+      addManifestationResult(ritualId, description.trim(), new Date().toISOString(), type, signType, imageUrl);
+
+      if (isSpilling) {
+        // Show celebration modal instead of immediately going back
+        setShowCelebration(true);
+      } else {
+        // For regular signs, just go back with success feedback
+        showToast('Sign recorded! ✨', 'success');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.back();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save. Please try again.';
+      showToast(errorMessage, 'error', { duration: 4000 });
+      console.error('[handleSave] Error:', error);
+    }
+  };
+
+  const handleCelebrationClose = () => {
+    setShowCelebration(false);
     router.back();
   };
 
-  if (!ritual || !manif) {
+  if (!ritual) {
     return (
       <GradientScreen>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: theme.textSecondary, fontSize: 16 }}>Ritual not found</Text>
+          <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
+            <Text style={{ color: theme.primary, fontWeight: '600' }}>Go back</Text>
+          </Pressable>
+        </View>
+      </GradientScreen>
+    );
+  }
+
+  // If manifestation doesn't exist, show message that user needs to create ritual with tangible outcome first
+  if (!manif) {
+    return (
+      <GradientScreen>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <Text style={{ color: theme.textSecondary, fontSize: 16, textAlign: 'center', marginBottom: 16 }}>
+            No manifestation found for this ritual
+          </Text>
+          <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
+            Manifestations are created automatically when you log a ritual completion
+          </Text>
           <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
             <Text style={{ color: theme.primary, fontWeight: '600' }}>Go back</Text>
           </Pressable>
@@ -66,7 +126,7 @@ export default function AddManifestationScreen() {
           <MaterialIcons name="close" size={24} color={theme.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}>
-          {isSpilling ? '⭐ It Spilled' : '✦ Log a Sign'}
+          {isSpilling ? '⭐ It Spilled' : 'Log a Sign'}
         </Text>
         <Pressable
           onPress={handleSave}
@@ -91,13 +151,20 @@ export default function AddManifestationScreen() {
             <Text style={styles.ritualNameSmall}>— {ritual.name}</Text>
           </View>
 
+          {/* Ritual Image */}
+          {ritual.imageUrl ? (
+            <View style={styles.ritualImageContainer}>
+              <ImageDisplay imageUri={ritual.imageUrl} size={100} />
+            </View>
+          ) : null}
+
           {/* Mode toggle */}
           <View style={styles.modeToggleRow}>
             <Pressable
               style={[styles.modeToggle, !isSpilling && styles.modeToggleActive]}
               onPress={() => { setIsSpilling(false); Haptics.selectionAsync(); }}
             >
-              <Text style={[styles.modeToggleText, !isSpilling && styles.modeToggleTextActive]}>✦ Log a Sign</Text>
+              <Text style={[styles.modeToggleText, !isSpilling && styles.modeToggleTextActive]}>Log a Sign</Text>
             </Pressable>
             <Pressable
               style={[styles.modeToggle, isSpilling && styles.modeToggleSpillActive]}
@@ -159,6 +226,16 @@ export default function AddManifestationScreen() {
             textAlignVertical="top"
           />
 
+          {/* Image Upload */}
+          <ImageField
+            imageUrl={imageUrl}
+            onImageChange={setImageUrl}
+            fieldLabel="Photo"
+            uploadLabel="Add Sign Photo"
+            showCameraOption={true}
+            previewSize={200}
+          />
+
           {/* Previous signs */}
           {manif.results.length > 0 && (
             <>
@@ -174,7 +251,7 @@ export default function AddManifestationScreen() {
                         {isFinal ? '⭐ Spilled' : `${signCfg?.emoji ?? '✦'} ${signCfg?.label ?? 'Sign'}`}
                       </Text>
                       <Text style={styles.prevEntryDate}>
-                        {new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {formatShortDate(r.date)}
                       </Text>
                     </View>
                     <Text style={styles.prevEntryNote}>{r.note}</Text>
@@ -185,6 +262,23 @@ export default function AddManifestationScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Spilled Celebration Modal */}
+      <CelebrationModal
+        visible={showCelebration}
+        ritualName={ritual.name}
+        daysActive={Math.ceil(
+          (new Date().getTime() - new Date(manif.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+        )}
+        signsLogged={manif.results.filter(r => r.type === 'sign').length}
+        onClose={handleCelebrationClose}
+        onUndo={() => {
+          if (manif) {
+            unspillManifestation(manif.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+        }}
+      />
     </GradientScreen>
   );
 }
@@ -201,6 +295,7 @@ const styles = StyleSheet.create({
   intentionLabel: { fontSize: 9, fontWeight: '700', color: theme.primary, letterSpacing: 1, marginBottom: 6 },
   intentionText: { fontSize: 15, color: theme.textPrimary, lineHeight: 22, fontStyle: 'italic', fontFamily: theme.fonts.serif },
   ritualNameSmall: { fontSize: 11, color: theme.textMuted, marginTop: 6 },
+  ritualImageContainer: { alignItems: 'center', marginTop: 14, marginBottom: 16 },
 
   modeToggleRow: { flexDirection: 'row', backgroundColor: theme.surfaceLight, borderRadius: 12, padding: 3, marginTop: 18, marginBottom: 4 },
   modeToggle: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },

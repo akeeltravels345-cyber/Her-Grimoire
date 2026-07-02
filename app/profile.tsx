@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, Switch, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, TextInput, StyleSheet, Switch, Platform, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
@@ -12,6 +13,8 @@ import GradientScreen from '../components/GradientScreen';
 import { useApp } from '../contexts/AppContext';
 import { getComputedStatus } from '../services/mockData';
 import Svg, { Circle } from 'react-native-svg';
+import ImageUploadButton from '../components/ImageUploadButton';
+import ImageDisplay from '../components/ImageDisplay';
 
 const PROFILE_KEY = 'grimoire_profile';
 
@@ -21,6 +24,7 @@ interface ProfileData {
   tradition: string;
   experienceLevel: string;
   bio: string;
+  profileImageUrl?: string;
 }
 
 interface SettingsData {
@@ -87,6 +91,15 @@ export default function ProfileScreen() {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [isEditing, setIsEditing] = useState(false);
   const [editProfile, setEditProfile] = useState<ProfileData>(DEFAULT_PROFILE);
+  const [previewPhotoUri, setPreviewPhotoUri] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Track component mount state
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Compute stats inline
   const totalPerformed = rituals.reduce((sum, r) => sum + r.timesPerformed, 0);
@@ -126,11 +139,19 @@ export default function ProfileScreen() {
           const parsed = JSON.parse(profileData);
           setProfile(parsed);
           setEditProfile(parsed);
-        } catch { /* ignore */ }
+        } catch (error) {
+          console.warn('[profile] Failed to parse profile data:', error);
+        }
       }
       if (settingsData) {
-        try { setSettings(JSON.parse(settingsData)); } catch { /* ignore */ }
+        try {
+          setSettings(JSON.parse(settingsData));
+        } catch (error) {
+          console.warn('[profile] Failed to parse settings data:', error);
+        }
       }
+    }).catch(error => {
+      console.error('[profile] Error loading profile/settings:', error);
     });
   }, []);
 
@@ -189,9 +210,30 @@ export default function ProfileScreen() {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
+            {profile.profileImageUrl ? (
+              <ImageDisplay
+                imageUri={profile.profileImageUrl}
+                size={80}
+                onRemove={() => {
+                  const updated = { ...editProfile, profileImageUrl: undefined };
+                  setEditProfile(updated);
+                  setProfile(updated);
+                  AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(updated));
+                }}
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+            )}
+            {isEditing && (
+              <ImageUploadButton
+                onImageSelect={(imageUri) => {
+                  setPreviewPhotoUri(imageUri);
+                }}
+                label="Change Photo"
+              />
+            )}
           </View>
 
           {isEditing ? (
@@ -304,6 +346,60 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Practice Management */}
+        <Text style={styles.sectionTitle}>Practice Management</Text>
+        <View style={styles.settingsCard}>
+          <Pressable style={styles.settingRow} onPress={() => router.push('/core-practice-settings')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="auto-awesome" size={20} color={theme.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Core Practice</Text>
+                <Text style={styles.settingDesc}>{coreCategories.length} categories tracking monthly</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+
+          <View style={styles.settingDivider} />
+
+          <Pressable style={styles.settingRow} onPress={() => router.push('/month-history')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="auto-stories" size={20} color={'#C9A84C'} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Monthly Chronicle</Text>
+                <Text style={styles.settingDesc}>Browse your past monthly cycles</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+
+          <View style={styles.settingDivider} />
+
+          <Pressable style={styles.settingRow} onPress={() => router.push('/manage-categories')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="tune" size={20} color={theme.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Manage Categories</Text>
+                <Text style={styles.settingDesc}>Add or remove practice categories</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+
+          <View style={styles.settingDivider} />
+
+          <Pressable style={styles.settingRow} onPress={() => router.push('/spell-research')}>
+            <View style={styles.settingInfo}>
+              <MaterialIcons name="science" size={20} color={theme.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Spell Research List</Text>
+                <Text style={styles.settingDesc}>Spells to explore and add to your grimoire</Text>
+              </View>
+            </View>
+            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
+          </Pressable>
+        </View>
+
         {/* Notification Settings */}
         <Text style={styles.sectionTitle}>Notifications</Text>
         <View style={styles.settingsCard}>
@@ -337,13 +433,21 @@ export default function ProfileScreen() {
               value={settings.ritualReminders}
               onValueChange={async (v) => {
                 if (v) {
-                  const { status } = await Notifications.getPermissionsAsync();
-                  if (status !== 'granted') {
-                    const { status: newStatus } = await Notifications.requestPermissionsAsync();
-                    if (newStatus !== 'granted') return;
+                  try {
+                    const { status } = await Notifications.getPermissionsAsync();
+                    if (status !== 'granted') {
+                      const { status: newStatus } = await Notifications.requestPermissionsAsync();
+                      if (newStatus !== 'granted') return;
+                    }
+                  } catch (error) {
+                    console.error('[profile] Error requesting notification permissions:', error);
+                    return;
                   }
                 }
-                updateSetting('ritualReminders', v);
+                // Only update if component is still mounted
+                if (isMountedRef.current) {
+                  updateSetting('ritualReminders', v);
+                }
               }}
               trackColor={{ false: theme.surfaceLight, true: theme.success + '50' }}
               thumbColor={settings.ritualReminders ? theme.success : theme.textMuted}
@@ -406,57 +510,6 @@ export default function ProfileScreen() {
             />
           </View>
 
-          <View style={styles.settingDivider} />
-
-          <Pressable style={styles.settingRow} onPress={() => router.push('/core-practice-settings')}>
-            <View style={styles.settingInfo}>
-              <MaterialIcons name="auto-awesome" size={20} color={theme.primary} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Core Practice</Text>
-                <Text style={styles.settingDesc}>{coreCategories.length} categories tracking monthly</Text>
-              </View>
-            </View>
-            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
-          </Pressable>
-
-          <View style={styles.settingDivider} />
-
-          <Pressable style={styles.settingRow} onPress={() => router.push('/month-history')}>
-            <View style={styles.settingInfo}>
-              <MaterialIcons name="auto-stories" size={20} color={'#C9A84C'} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Monthly Chronicle</Text>
-                <Text style={styles.settingDesc}>Browse your past monthly cycles</Text>
-              </View>
-            </View>
-            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
-          </Pressable>
-
-          <View style={styles.settingDivider} />
-
-          <Pressable style={styles.settingRow} onPress={() => router.push('/manage-categories')}>
-            <View style={styles.settingInfo}>
-              <MaterialIcons name="tune" size={20} color={theme.textSecondary} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Manage Categories</Text>
-                <Text style={styles.settingDesc}>Add or remove practice categories</Text>
-              </View>
-            </View>
-            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
-          </Pressable>
-
-          <View style={styles.settingDivider} />
-
-          <Pressable style={styles.settingRow} onPress={() => router.push('/spell-research')}>
-            <View style={styles.settingInfo}>
-              <MaterialIcons name="science" size={20} color={theme.accent} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Spell Research List</Text>
-                <Text style={styles.settingDesc}>Spells to explore and add to your grimoire</Text>
-              </View>
-            </View>
-            <MaterialIcons name="chevron-right" size={24} color={theme.textMuted} />
-          </Pressable>
         </View>
 
         {/* Data Management */}
@@ -502,6 +555,49 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* Photo Preview Modal */}
+      <Modal
+        visible={!!previewPhotoUri}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setPreviewPhotoUri(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Preview Photo</Text>
+            {previewPhotoUri && (
+              <Image
+                source={{ uri: previewPhotoUri }}
+                style={styles.previewImage}
+                contentFit="cover"
+              />
+            )}
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setPreviewPhotoUri(null)}
+              >
+                <MaterialIcons name="close" size={20} color={theme.textSecondary} />
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={() => {
+                  if (previewPhotoUri) {
+                    setEditProfile(p => ({ ...p, profileImageUrl: previewPhotoUri }));
+                    setPreviewPhotoUri(null);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  }
+                }}
+              >
+                <MaterialIcons name="check" size={20} color={theme.background} />
+                <Text style={styles.confirmButtonText}>Use This Photo</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </GradientScreen>
   );
 }
@@ -555,4 +651,16 @@ const styles = StyleSheet.create({
   settingLabel: { fontSize: 15, fontWeight: '600', color: theme.textPrimary },
   settingDesc: { fontSize: 12, color: theme.textMuted, marginTop: 2, fontWeight: '500' },
   settingDivider: { height: 1, backgroundColor: theme.border, marginHorizontal: 16 },
+
+  // Photo Preview Modal
+  modalOverlay: { flex: 1, backgroundColor: theme.background + 'E6', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  modalContent: { backgroundColor: theme.surface, borderRadius: theme.radius.lg, overflow: 'hidden', ...theme.shadows.card, width: '100%', maxWidth: 320 },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: theme.textPrimary, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  previewImage: { width: '100%', height: 320, marginVertical: 8 },
+  modalButtons: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 16 },
+  modalButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: theme.radius.md },
+  cancelButton: { backgroundColor: theme.surfaceLight, borderWidth: 1, borderColor: theme.border },
+  cancelButtonText: { fontSize: 13, fontWeight: '600', color: theme.textSecondary },
+  confirmButton: { backgroundColor: theme.primary },
+  confirmButtonText: { fontSize: 13, fontWeight: '600', color: theme.background },
 });

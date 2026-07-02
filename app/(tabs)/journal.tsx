@@ -11,13 +11,13 @@ import { useApp } from '../../contexts/AppContext';
 import { useAlert } from '@/template';
 import { getRecentActivity } from '../../services/mockData';
 import SwipeableRow from '../../components/SwipeableRow';
+import { formatMonthYear, formatDateWithLongDay } from '../../utils/dateHelpers';
 
 const MOOD_COLORS: Record<string, string> = {
-  Connected: '#6667AB', Empowered: '#7B337E', Peaceful: '#5EBD8A',
-  Grateful: '#C9A84C', Reflective: '#4EA8DE', Contemplative: '#8B5CF6',
-  Hopeful: '#5EBDAA', Grounded: '#5EBD8A', Centered: '#6667AB',
-  Elevated: '#C9847A', Determined: '#E85D6F', Mystified: '#7C5CBF',
-  Aware: '#4EA8DE', Radiant: '#C9A84C', Joyful: '#F59E0B',
+  Empowered: '#7B337E', Aligned: '#5EBDAA', Renewed: '#6667AB',
+  Elevated: '#C9847A', Balanced: '#5EBD8A', Connected: '#6667AB',
+  Transformed: '#8B5CF6', Inspired: '#C9A84C', Grounded: '#5EBD8A',
+  Amazed: '#F59E0B', Peaceful: '#5EBD8A',
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -54,7 +54,7 @@ function CalendarView({ entryDates }: { entryDates: string[] }) {
   }
 
   const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-  const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const monthName = formatMonthYear(now);
 
   // Build cell array: nulls for padding + day numbers
   const cells: (number | null)[] = [
@@ -204,9 +204,7 @@ export default function JournalScreen() {
   const grouped = useMemo(() => {
     const g: Record<string, TimelineItem[]> = {};
     displayItems.forEach(item => {
-      const key = new Date(item.date).toLocaleDateString('en-US', {
-        weekday: 'long', month: 'long', day: 'numeric',
-      });
+      const key = formatDateWithLongDay(item.date);
       if (!g[key]) g[key] = [];
       g[key].push(item);
     });
@@ -386,21 +384,27 @@ export default function JournalScreen() {
         {viewMode === 'timeline' && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 10 }}>
             <Pressable style={[styles.summaryCard, { borderLeftColor: '#6667AB' }]} onPress={() => { setTab('personal'); setTypeFilter('dream'); }}>
-              <Text style={styles.summaryEmoji}>🌙</Text>
+              <View style={[styles.summaryIconBg, { backgroundColor: '#6667AB' + '15' }]}>
+                <Text style={styles.summaryEmojiLarge}>🌙</Text>
+              </View>
               <Text style={[styles.summaryNum, { color: '#6667AB' }]}>{summaryData.dreamsThisMonth}</Text>
               <Text style={styles.summaryLabel}>DREAMS</Text>
               <Text style={styles.summarySub}>Last: {formatLastDate(summaryData.lastDreamDate)}</Text>
             </Pressable>
 
             <Pressable style={[styles.summaryCard, { borderLeftColor: '#C9847A' }]} onPress={() => { setTab('personal'); setTypeFilter('encounter'); }}>
-              <Text style={styles.summaryEmoji}>👁️</Text>
+              <View style={[styles.summaryIconBg, { backgroundColor: '#C9847A' + '15' }]}>
+                <Text style={styles.summaryEmojiLarge}>👁️</Text>
+              </View>
               <Text style={[styles.summaryNum, { color: '#C9847A' }]}>{summaryData.encountersThisMonth}</Text>
               <Text style={styles.summaryLabel}>ENCOUNTERS</Text>
               <Text style={styles.summarySub}>Last: {formatLastDate(summaryData.lastEncounterDate)}</Text>
             </Pressable>
 
             <View style={[styles.summaryCard, { borderLeftColor: '#C9A84C' }]}>
-              <MaterialIcons name="auto-stories" size={18} color="#C9A84C" style={{ marginBottom: 4 }} />
+              <View style={[styles.summaryIconBg, { backgroundColor: '#C9A84C' + '15' }]}>
+                <MaterialIcons name="auto-stories" size={44} color="#C9A84C" />
+              </View>
               <Text style={[styles.summaryNum, { color: '#C9A84C' }]}>{allItems.length}</Text>
               <Text style={styles.summaryLabel}>TOTAL</Text>
               <Text style={styles.summarySub}>{ritualEntries.length} ritual · {standaloneEntries.length} personal</Text>
@@ -443,89 +447,150 @@ export default function JournalScreen() {
 // ─── Calendar styles ───────────────────────────────────────────────────────────
 const calStyles = StyleSheet.create({
   container: {
-    backgroundColor: theme.surface, borderRadius: theme.radius.lg,
-    padding: 16, marginBottom: 20, borderWidth: 1, borderColor: theme.border,
+    backgroundColor: theme.surface, borderRadius: 16,
+    padding: 14, marginBottom: 20, borderWidth: 1, borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  monthLabel: { fontSize: 15, fontWeight: '700', color: theme.textPrimary },
-  streakPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.primary + '18', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: theme.primary + '30' },
-  streakText: { fontSize: 12, fontWeight: '700', color: theme.primary },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  monthLabel: { fontSize: 14, fontWeight: '700', color: theme.textPrimary },
+  streakPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: theme.primary + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 16, borderWidth: 0.5, borderColor: theme.primary + '30' },
+  streakText: { fontSize: 11, fontWeight: '600', color: theme.primary },
   dayLabels: { flexDirection: 'row', marginBottom: 8 },
-  dayLabel: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', color: theme.textMuted },
+  dayLabel: { flex: 1, textAlign: 'center', fontSize: 10, fontWeight: '600', color: theme.textMuted },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
-  dayCircle: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 1 },
+  dayCircle: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   dayCircleFilled: { backgroundColor: theme.primary },
   dayCircleToday: { borderWidth: 1.5, borderColor: theme.primary },
-  dayNum: { fontSize: 12, fontWeight: '500', color: theme.textSecondary },
+  dayNum: { fontSize: 11, fontWeight: '500', color: theme.textSecondary },
   dayNumFilled: { color: theme.background, fontWeight: '700' },
-  calFooter: { fontSize: 11, color: theme.textMuted, textAlign: 'center', marginTop: 12 },
+  calFooter: { fontSize: 10, color: theme.textMuted, textAlign: 'center', marginTop: 10 },
 });
 
 // ─── Screen styles ─────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
-  title: { fontSize: 26, fontWeight: '700', color: theme.textPrimary, letterSpacing: 0.3 },
-  headerCount: { fontSize: 13, color: theme.textSecondary, marginTop: 2 },
+  title: { fontSize: 24, fontWeight: '700', color: theme.textPrimary, letterSpacing: 0.2 },
+  headerCount: { fontSize: 12, color: theme.textMuted, marginTop: 2, fontWeight: '500' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surface },
-  iconBtnActive: { backgroundColor: theme.primary + '18', borderWidth: 1, borderColor: theme.primary + '40' },
-  writeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  writeBtnText: { fontSize: 13, fontWeight: '700', color: theme.background },
+  iconBtn: {
+    width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  iconBtnActive: { backgroundColor: theme.primary + '15', borderWidth: 1, borderColor: theme.primary + '40', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  writeBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, shadowColor: theme.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 2,
+  },
+  writeBtnText: { fontSize: 12, fontWeight: '700', color: theme.background },
 
   searchBar: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: theme.border },
   searchInput: { flex: 1, fontSize: 15, color: theme.textPrimary, padding: 0 },
 
   tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 14, flexWrap: 'wrap' },
-  tabChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: theme.surface },
-  tabChipActive: { backgroundColor: theme.surfaceLight, borderWidth: 1, borderColor: theme.primary + '40' },
-  tabChipText: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
-  tabChipTextActive: { color: theme.textPrimary },
-  typeFilterPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: theme.primary + '18', borderWidth: 1, borderColor: theme.primary + '40' },
-  typeFilterPillText: { fontSize: 12, fontWeight: '600', color: theme.primary },
+  tabChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  tabChipActive: {
+    backgroundColor: theme.primary + '15', borderWidth: 1, borderColor: theme.primary + '40',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  tabChipText: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+  tabChipTextActive: { color: theme.primary, fontWeight: '700' },
+  typeFilterPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 14, backgroundColor: theme.primary + '15', borderWidth: 0.5, borderColor: theme.primary + '30' },
+  typeFilterPillText: { fontSize: 11, fontWeight: '600', color: theme.primary },
 
-  summaryCard: { backgroundColor: theme.surface, borderRadius: theme.radius.lg, borderWidth: 1, borderColor: theme.border, borderLeftWidth: 3, padding: 14, width: 130 },
-  summaryEmoji: { fontSize: 18, marginBottom: 4 },
-  summaryNum: { fontSize: 22, fontWeight: '700', lineHeight: 26 },
-  summaryLabel: { fontSize: 9, fontWeight: '700', color: theme.textMuted, letterSpacing: 1, marginTop: 2 },
-  summarySub: { fontSize: 10, color: theme.textMuted, marginTop: 4 },
+  summaryCard: {
+    backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border, borderLeftWidth: 3, padding: 14, width: 140,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+    alignItems: 'center',
+  },
+  summaryIconBg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  summaryEmoji: { fontSize: 20, marginBottom: 6 },
+  summaryEmojiLarge: { fontSize: 36, lineHeight: 40 },
+  summaryNum: { fontSize: 22, fontWeight: '700', lineHeight: 26, textAlign: 'center' },
+  summaryLabel: { fontSize: 10, fontWeight: '600', color: theme.textMuted, letterSpacing: 1, marginTop: 6, textTransform: 'uppercase', textAlign: 'center' },
+  summarySub: { fontSize: 10, color: theme.textMuted, marginTop: 4, fontStyle: 'italic', textAlign: 'center', lineHeight: 14 },
 
-  dateSection: { marginBottom: 20 },
-  dateDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10, marginTop: 4 },
+  dateSection: { marginBottom: 18 },
+  dateDivider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, marginTop: 8 },
   dateDividerLine: { flex: 1, height: 0.5, backgroundColor: theme.border },
-  dateDividerText: { fontSize: 10, fontWeight: '700', color: theme.textMuted, letterSpacing: 1.5, textTransform: 'uppercase' },
+  dateDividerText: { fontSize: 10, fontWeight: '700', color: theme.textMuted, letterSpacing: 1.2, textTransform: 'uppercase' },
 
   entryCard: {
-    backgroundColor: theme.surface, borderRadius: 14, padding: 14,
+    backgroundColor: theme.surface, borderRadius: 14, padding: 13,
     borderWidth: 1, borderColor: theme.border, borderLeftWidth: 3,
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   entryTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  ritualDot: { width: 10, height: 10, borderRadius: 5, shadowOpacity: 0.5, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
-  typeIconWrap: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  entryTitle: { fontSize: 15, fontWeight: '600', color: theme.textPrimary, fontFamily: theme.fonts.serif },
-  entryType: { fontSize: 11, fontWeight: '500', marginTop: 1 },
-  moodPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 0.5 },
+  ritualDot: { width: 8, height: 8, borderRadius: 4, shadowOpacity: 0.4, shadowRadius: 2, shadowOffset: { width: 0, height: 0 } },
+  typeIconWrap: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  entryTitle: { fontSize: 14, fontWeight: '700', color: theme.textPrimary, fontFamily: theme.fonts.serif },
+  entryType: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+  moodPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 0.5 },
   moodPillText: { fontSize: 10, fontWeight: '600' },
-  entryPreview: { fontSize: 13, color: theme.textSecondary, lineHeight: 19, fontFamily: theme.fonts.serif, fontStyle: 'italic' },
+  entryPreview: { fontSize: 13, color: theme.textSecondary, lineHeight: 18, fontFamily: theme.fonts.serif, fontStyle: 'italic', marginBottom: 3 },
   tagRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
-  tagChip: { backgroundColor: theme.surfaceLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  tagText: { fontSize: 11, color: theme.accent, fontWeight: '500' },
+  tagChip: { backgroundColor: theme.accent + '12', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 0.5, borderColor: theme.accent + '25' },
+  tagText: { fontSize: 11, color: theme.accent, fontWeight: '600' },
 
-  searchEmpty: { alignItems: 'center', paddingVertical: 60, gap: 12 },
-  searchEmptyText: { fontSize: 15, color: theme.textMuted, textAlign: 'center' },
+  searchEmpty: { alignItems: 'center', paddingVertical: 50, gap: 10 },
+  searchEmptyText: { fontSize: 13, color: theme.textMuted, textAlign: 'center' },
 
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
-  emptyImage: { width: 180, height: 180, marginBottom: 24 },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: theme.textPrimary, marginBottom: 8 },
-  emptyText: { fontSize: 14, color: theme.textSecondary, textAlign: 'center', lineHeight: 21, marginBottom: 28, fontFamily: theme.fonts.serif },
-  emptyCta: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: theme.primary, paddingHorizontal: 24, paddingVertical: 13, borderRadius: 30 },
-  emptyCtaText: { fontSize: 15, fontWeight: '700', color: theme.background },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  emptyImage: { width: 140, height: 140, marginBottom: 20 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 8 },
+  emptyText: { fontSize: 13, color: theme.textSecondary, textAlign: 'center', lineHeight: 19, marginBottom: 24, fontFamily: theme.fonts.serif },
+  emptyCta: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.primary, paddingHorizontal: 20, paddingVertical: 11, borderRadius: 22 },
+  emptyCtaText: { fontSize: 13, fontWeight: '700', color: theme.background },
 
   fab: {
     position: 'absolute', right: 20,
-    width: 52, height: 52, borderRadius: 26,
+    width: 56, height: 56, borderRadius: 28,
     backgroundColor: theme.primary, alignItems: 'center', justifyContent: 'center',
-    ...theme.shadows.elevated,
+    shadowColor: theme.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });

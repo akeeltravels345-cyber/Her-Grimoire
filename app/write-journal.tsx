@@ -13,6 +13,7 @@ import { getCurrentPlanetaryHour } from '../services/planetaryHours';
 import { useApp } from '../contexts/AppContext';
 import { useAlert } from '@/template';
 import GradientScreen from '../components/GradientScreen';
+import ImageField from '../components/ImageField';
 
 const SPIRITUAL_EMOJIS = [
   '🌀', '✨', '🔮', '💫', '🌊', '🔥', '🌿', '⚡',
@@ -38,15 +39,16 @@ export default function WriteJournalScreen() {
   const [title, setTitle] = useState(editEntry?.title || '');
   const [notes, setNotes] = useState(editEntry?.notes || '');
   const [type, setType] = useState(editEntry?.type || 'reflection');
-  const [mood, setMood] = useState(editEntry?.mood || '');
+  const [selectedMoods, setSelectedMoods] = useState<string[]>(editEntry?.moods || editEntry?.mood ? [editEntry.mood] : []);
   const [tags, setTags] = useState(editEntry?.tags?.join(', ') || '');
+  const [imageUrl, setImageUrl] = useState<string | undefined>(editEntry?.imageUrl);
   const [isAddingMood, setIsAddingMood] = useState(false);
   const [newMoodText, setNewMoodText] = useState('');
   const [showNewTypeModal, setShowNewTypeModal] = useState(false);
   const [newTypeLabel, setNewTypeLabel] = useState('');
   const [newTypeEmoji, setNewTypeEmoji] = useState('✨');
 
-  const canSave = title.trim().length > 0 && notes.trim().length > 0;
+  const canSave = title.trim().length > 0 && notes.trim().length > 0 && selectedMoods.length > 0;
 
   const handleSave = () => {
     if (!canSave) return;
@@ -55,18 +57,20 @@ export default function WriteJournalScreen() {
       updateStandaloneEntry(editEntry.id, {
         title: title.trim(),
         notes: notes.trim(),
-        mood: mood || undefined,
+        moods: selectedMoods,
         tags: parsedTags,
         type,
+        imageUrl,
       });
     } else {
       addStandaloneEntry({
         date: new Date().toISOString(),
         title: title.trim(),
         notes: notes.trim(),
-        mood: mood || undefined,
+        moods: selectedMoods,
         tags: parsedTags,
         type,
+        imageUrl,
       });
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -122,12 +126,13 @@ export default function WriteJournalScreen() {
         </Pressable>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom + 200, 300) }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={true}
         >
           {/* Cosmic context pill */}
           {!editEntry && (
@@ -180,22 +185,37 @@ export default function WriteJournalScreen() {
           />
 
           {/* Mood */}
-          <Text style={styles.fieldLabel}>MOOD</Text>
+          <Text style={styles.fieldLabel}>HOW DO YOU FEEL? * (select one or more)</Text>
           <View style={styles.moodRow}>
-            {moods.map(m => (
-              <Pressable
-                key={m}
-                style={[styles.moodChip, mood === m && styles.moodChipActive]}
-                onPress={() => { setMood(mood === m ? '' : m); Haptics.selectionAsync(); }}
-                onLongPress={() => showAlert('Delete Mood?', `Remove "${m}"?`, [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => { deleteMood(m); if (mood === m) setMood(''); } },
-                ])}
-                delayLongPress={500}
-              >
-                <Text style={[styles.moodChipText, mood === m && styles.moodChipTextActive]}>{m}</Text>
-              </Pressable>
-            ))}
+            {moods.map(m => {
+              const isSelected = selectedMoods.includes(m);
+              return (
+                <Pressable
+                  key={m}
+                  style={[styles.moodChip, isSelected && styles.moodChipActive]}
+                  onPress={() => {
+                    if (isSelected) {
+                      setSelectedMoods(prev => prev.filter(mood => mood !== m));
+                    } else {
+                      setSelectedMoods(prev => [...prev, m]);
+                    }
+                    Haptics.selectionAsync();
+                  }}
+                  onLongPress={() => showAlert('Delete Mood?', `Remove "${m}"?`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => { deleteMood(m); if (isSelected) setSelectedMoods(prev => prev.filter(mood => mood !== m)); } },
+                  ])}
+                  delayLongPress={500}
+                >
+                  <View style={styles.moodCheckmark}>
+                    <Text style={[styles.moodChipText, isSelected && styles.moodChipTextActive]}>{m}</Text>
+                    {isSelected && (
+                      <MaterialIcons name="check" size={14} color={theme.primary} />
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
             {isAddingMood ? (
               <View style={styles.moodAddInline}>
                 <TextInput
@@ -231,6 +251,16 @@ export default function WriteJournalScreen() {
             onChangeText={setTags}
             placeholder="dream, moon, breakthrough... (comma-separated)"
             placeholderTextColor={theme.textMuted}
+          />
+
+          {/* Image Upload */}
+          <ImageField
+            imageUrl={imageUrl}
+            onImageChange={setImageUrl}
+            fieldLabel="Photo"
+            uploadLabel="Add Journal Photo"
+            showCameraOption={true}
+            previewSize={200}
           />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -283,67 +313,103 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: theme.border,
   },
   headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: theme.textPrimary },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: theme.textPrimary, letterSpacing: 0.3 },
   saveBtn: { paddingHorizontal: 18, paddingVertical: 8, backgroundColor: theme.primary, borderRadius: theme.radius.sm },
   saveBtnDisabled: { backgroundColor: theme.surfaceLight },
   saveBtnText: { fontSize: 15, fontWeight: '600', color: theme.background },
 
   cosmicPill: {
-    backgroundColor: theme.primary + '18', borderWidth: 1, borderColor: theme.primary + '30',
-    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, marginTop: 16, marginBottom: 6,
-    alignSelf: 'center',
+    backgroundColor: theme.primary + '25', borderWidth: 1.5, borderColor: theme.primary + '50',
+    borderRadius: 24, paddingHorizontal: 18, paddingVertical: 12, marginTop: 20, marginBottom: 24,
+    alignSelf: 'center', ...theme.shadows.card,
   },
-  cosmicPillText: { fontSize: 12, color: theme.textSecondary, fontWeight: '500' },
+  cosmicPillText: { fontSize: 13, color: theme.textSecondary, fontWeight: '600', letterSpacing: 0.3 },
 
-  typeSection: { marginTop: 16, marginBottom: 4 },
-  typeRow: { gap: 8, paddingVertical: 4 },
+  typeSection: { marginTop: 20, marginBottom: 8 },
+  typeRow: { gap: 10, paddingVertical: 6 },
   typeChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
-    backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20,
+    backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.borderLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  typeChipActive: { backgroundColor: theme.primary + '15', borderColor: theme.primary },
+  typeChipActive: { backgroundColor: theme.primary + '20', borderColor: theme.primary, borderWidth: 2 },
   typeChipText: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
-  typeChipTextActive: { color: theme.primary },
+  typeChipTextActive: { color: theme.primary, fontWeight: '700' },
   newTypeBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
-    borderWidth: 1.5, borderColor: theme.accent + '40', borderStyle: 'dashed',
-    backgroundColor: theme.accent + '08',
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20,
+    borderWidth: 2, borderColor: theme.accent + '50', borderStyle: 'dashed',
+    backgroundColor: theme.accent + '12',
   },
-  newTypeBtnText: { fontSize: 12, fontWeight: '600', color: theme.accent },
+  newTypeBtnText: { fontSize: 12, fontWeight: '700', color: theme.accent },
 
   titleInput: {
-    fontSize: 22, fontWeight: '700', color: theme.textPrimary,
-    fontFamily: theme.fonts.serif, marginTop: 20, marginBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: theme.border, paddingBottom: 10,
+    fontSize: 28, fontWeight: '700', color: theme.textPrimary,
+    fontFamily: theme.fonts.serif, marginTop: 24, marginBottom: 16,
+    borderBottomWidth: 2, borderBottomColor: theme.primary + '40', paddingBottom: 12,
+    textShadowColor: theme.primary + '20',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   notesInput: {
-    fontSize: 16, color: theme.textPrimary, lineHeight: 26,
-    fontFamily: theme.fonts.serif, minHeight: 200,
-    backgroundColor: theme.surface, borderRadius: theme.radius.md,
-    padding: 16, borderWidth: 1, borderColor: theme.border,
-    marginBottom: 24,
+    fontSize: 16, color: theme.textPrimary, lineHeight: 28,
+    fontFamily: theme.fonts.serif, minHeight: 240,
+    backgroundColor: theme.surface, borderRadius: 20,
+    padding: 20, borderWidth: 1.5, borderColor: theme.primary + '30',
+    marginBottom: 28,
+    shadowColor: theme.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
   },
 
   fieldLabel: {
-    fontSize: 10, fontWeight: '700', color: theme.textMuted,
-    letterSpacing: 1.2, marginBottom: 10,
+    fontSize: 11, fontWeight: '700', color: theme.primary + '70',
+    letterSpacing: 1.5, marginBottom: 12, marginTop: 4,
+    textTransform: 'uppercase',
   },
-  moodRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
-  moodChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.border },
-  moodChipActive: { backgroundColor: theme.primary + '20', borderColor: theme.primary },
+  moodRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 28 },
+  moodChip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.borderLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  moodChipActive: { backgroundColor: theme.primary + '22', borderColor: theme.primary, borderWidth: 2 },
   moodChipText: { fontSize: 12, fontWeight: '500', color: theme.textMuted },
-  moodChipTextActive: { color: theme.primary, fontWeight: '600' },
-  moodAddChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1.5, borderColor: theme.accent + '40', borderStyle: 'dashed', backgroundColor: theme.accent + '08' },
+  moodChipTextActive: { color: theme.primary, fontWeight: '700' },
+  moodCheckmark: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  moodAddChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, borderWidth: 2, borderColor: theme.accent + '50', borderStyle: 'dashed', backgroundColor: theme.accent + '12',
+  },
   moodAddChipText: { fontSize: 12, fontWeight: '600', color: theme.accent },
-  moodAddInline: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 16, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.primary + '40' },
+  moodAddInline: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 18, backgroundColor: theme.surface, borderWidth: 1.5, borderColor: theme.primary + '50',
+    shadowColor: theme.primary,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
   moodAddInput: { fontSize: 12, color: theme.textPrimary, minWidth: 80, padding: 0 },
 
   tagsInput: {
-    backgroundColor: theme.surface, borderRadius: theme.radius.md,
-    padding: 14, fontSize: 14, color: theme.textPrimary,
-    borderWidth: 1, borderColor: theme.border,
+    backgroundColor: theme.surface, borderRadius: 16,
+    padding: 16, fontSize: 14, color: theme.textPrimary,
+    borderWidth: 1.5, borderColor: theme.primary + '25',
+    shadowColor: theme.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
